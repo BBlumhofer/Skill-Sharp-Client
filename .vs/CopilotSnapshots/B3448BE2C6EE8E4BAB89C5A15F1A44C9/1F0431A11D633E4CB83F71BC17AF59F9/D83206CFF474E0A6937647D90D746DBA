@@ -1,0 +1,450 @@
+﻿using System;
+using System.Threading;
+using System.Threading.Tasks;
+using Opc.Ua;
+using Opc.Ua.Client;
+using UAClient.Client;
+
+namespace UAClient
+{
+    class Program
+    {
+        private static async Task WithTimeout(Task task, TimeSpan timeout)
+        {
+            var completed = await Task.WhenAny(task, Task.Delay(timeout));
+            if (completed == task)
+            {
+                await task; // propagate exceptions
+                return;
+            }
+            throw new TimeoutException($"Operation timed out after {timeout.TotalSeconds} seconds");
+        }
+
+        private static async Task<T> WithTimeout<T>(Task<T> task, TimeSpan timeout)
+        {
+            var completed = await Task.WhenAny(task, Task.Delay(timeout));
+            if (completed == task)
+            {
+                return await task; // propagate exceptions
+            }
+            throw new TimeoutException($"Operation timed out after {timeout.TotalSeconds} seconds");
+        }
+        static async Task<int> Main(string[] args)
+        {
+            // Install global handlers for unobserved/background exceptions to improve resilience
+            TaskScheduler.UnobservedTaskException += (s, e) =>
+            {
+                try
+                {
+                    UAClient.Common.Log.Warn($"UnobservedTaskException: {e.Exception?.Message}");
+                }
+                catch { }
+                e.SetObserved();
+            };
+            AppDomain.CurrentDomain.UnhandledException += (s, e) =>
+            {
+                try
+                {
+                    var ex = e.ExceptionObject as Exception;
+                    UAClient.Common.Log.Warn($"UnhandledException: {ex?.Message}");
+                }
+                catch { }
+            };
+
+            var url = args.Length > 0 ? args[0] : "opc.tcp://172.17.10.80:4842";
+            var username = args.Length > 1 ? args[1] : "orchestrator";
+            var password = args.Length > 2 ? args[2] : "orchestrator";
+
+            var client = new Client.UaClient(url, username, password);
+            // shortcut: if fourth arg is --locktest, run the lock tester and exit
+            if (args.Length > 3 && args[3] == "--locktest")
+            {
+                return await Client.LockTest.Run(url, username, password, args.Length > 4 ? args[4] : "CA-Module");
+            }
+            try
+            {
+                // bound connect to avoid hangs
+                UAClient.Common.Log.Info("Connecting to OPC UA endpoint...");
+                await WithTimeout(client.ConnectAsync(), TimeSpan.FromSeconds(90));
+                Console.WriteLine("Connected.");
+                UAClient.Common.Log.Info($"Client connected to {url} as '{username}'");
+
+                var server = new Client.RemoteServer(client);
+
+                // connect to remote server with timeout (increased to 60s for slow discovery)
+                UAClient.Common.Log.Info("Connecting to remote server and discovering modules...");
+                await WithTimeout(server.ConnectAsync(), TimeSpan.FromSeconds(60));
+                Console.WriteLine($"Remote server status: {server.Status}");
+                UAClient.Common.Log.Info($"Remote server status: {server.Status}");
+
+                Console.WriteLine("Discovered modules:");
+                foreach (var kv in server.Modules)
+                {
+                    Console.WriteLine($" - {kv.Key} (methods: {kv.Value.Methods.Count})");
+                    foreach (var m in kv.Value.Methods)
+                        Console.WriteLine($"    * {m.Key}");
+                    if (kv.Value.Locks.Count>0)
+                    {
+                        Console.WriteLine("    Locks:");
+                        foreach(var l in kv.Value.Locks) Console.WriteLine($"      - {l.Key}");
+                    }
+                    if (kv.Value.Ports.Count>0)
+                    {
+                        Console.WriteLine("    Ports:");
+                        foreach(var p in kv.Value.Ports) Console.WriteLine($"      - {p.Key}");
+                    }
+                    if (kv.Value.Storages.Count>0)
+                    {
+                        Console.WriteLine("    Storages:");
+                        foreach(var s in kv.Value.Storages) Console.WriteLine($"      - {s.Key}");
+                    }
+                }
+
+                // For each module, create RemoteComponent wrappers for discovered methods/objects
+                Console.WriteLine();
+                Console.WriteLine("Component-level discovery (per module):");
+                var globalSub = new Client.SubscriptionManager(client);
+                foreach (var modKv in server.Modules)
+                {
+                    Console.WriteLine($"Module: {modKv.Key}");
+                    var module = modKv.Value;
+                    foreach (var m in module.Methods)
+                    {
+                        try
+                        {
+                            var name = m.Key;
+                            var callable = m.Value; // BaseRemoteCallable
+                            // Heuristic: consider this Methods entry a Component only if it exposes typical component children
+                            var sessionCheck = client.Session;
+                            bool looksLikeComponent = false;
+                            try
+                            {
+                                if (sessionCheck != null)
+                                {
+                                    var brow = new Browser(sessionCheck)
+                                    {
+                                        BrowseDirection = BrowseDirection.Forward,
+                                        ReferenceTypeId = ReferenceTypeIds.HierarchicalReferences,
+                                        NodeClassMask = (int)(NodeClass.Object | NodeClass.Variable | NodeClass.Method)
+                                    };
+                                    ReferenceDescriptionCollection refsCheck = await brow.BrowseAsync(callable.BaseNodeId);
+                                    if (refsCheck != null)
+                                    {
+                                        foreach (var rcc in refsCheck)
+                                        {
+                                            var nm = rcc.DisplayName?.Text ?? rcc.BrowseName?.Name ?? "";
+                                            if (string.Equals(nm, "Monitoring", StringComparison.OrdinalIgnoreCase)
+                                                || string.Equals(nm, "ParameterSet", StringComparison.OrdinalIgnoreCase)
+                                                || string.Equals(nm, "Attributes", StringComparison.OrdinalIgnoreCase)
+                                                || string.Equals(nm, "SkillSet", StringComparison.OrdinalIgnoreCase)
+                                                || string.Equals(nm, "Components", StringComparison.OrdinalIgnoreCase)
+                                                || string.Equals(nm, "MethodSet", StringComparison.OrdinalIgnoreCase))
+                                            {
+                                                looksLikeComponent = true;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            catch { }
+                            if (!looksLikeComponent) continue;
+
+                            var comp = new Client.RemoteComponent(name, callable.BaseNodeId, client, server);
+                            // populate monitoring/parameters/skills under this component
+                            try { await WithTimeout(comp.SetupSubscriptionsAsync(globalSub, true), TimeSpan.FromSeconds(8)); } catch { }
+                            Console.WriteLine($"  Component: {name}");
+                            // Skills
+                            if (comp.SkillSet.Count > 0)
+                            {
+                                Console.WriteLine($"    Skills ({comp.SkillSet.Count}):");
+                                foreach (var sk in comp.SkillSet.Keys) Console.WriteLine($"      - {sk}");
+                            }
+                            // Methods
+                            if (comp.MethodSet.Count > 0)
+                            {
+                                Console.WriteLine($"    Methods ({comp.MethodSet.Count}):");
+                                foreach (var me in comp.MethodSet.Keys) Console.WriteLine($"      - {me}");
+                            }
+                            // Monitoring
+                            if (comp.Monitoring.Count > 0)
+                            {
+                                Console.WriteLine($"    Monitoring ({comp.Monitoring.Count}):");
+                                foreach (var mo in comp.Monitoring) Console.WriteLine($"      - {mo.Key} = {mo.Value.Value}");
+                            }
+                            // ParameterSet
+                            if (comp.ParameterSet.Count > 0)
+                            {
+                                Console.WriteLine($"    ParameterSet ({comp.ParameterSet.Count}):");
+                                foreach (var pa in comp.ParameterSet) Console.WriteLine($"      - {pa.Key} = {pa.Value.Value}");
+                            }
+                        }
+                        catch { }
+                    }
+                }
+
+                    
+
+                // Integration example: use module-oriented handling instead of nested loops
+                // Pseudocode requested: module = await server.get_module("CA-Module") etc.
+
+                // Module lock/unlock handled via RemoteModule methods
+
+                
+
+                Client.RemoteModule? targetModule = null;
+                if (server.Modules.TryGetValue("CA-Module", out var foundModule))
+                {
+                    targetModule = foundModule;
+                }
+
+                if (targetModule != null)
+                {
+                    var session = client.Session ?? throw new InvalidOperationException("No session");
+
+                    
+
+
+                    
+
+                    // helper: start a specific skill with options (resetBefore, waitForCompleted, resetAfter)
+                    async Task<System.Collections.Generic.IDictionary<string, object?>> StartSkillWithOptionsAsync(Client.RemoteSkill skill)
+                    {
+                        var subMgr = new Client.SubscriptionManager(client);
+                        await WithTimeout(skill.SetupSubscriptionsAsync(subMgr, true), TimeSpan.FromSeconds(20));
+                        var parameters = new System.Collections.Generic.Dictionary<string, object?>() { ["ProductID"] = "CSHARP" };
+                        var execResult = await WithTimeout(skill.ExecuteAsync(parameters, waitForCompletion: true, resetAfterCompletion: true, resetBeforeIfHalted: true, timeout: TimeSpan.FromSeconds(60), subscriptionManager: subMgr), TimeSpan.FromSeconds(70));
+                        return execResult ?? new System.Collections.Generic.Dictionary<string, object?>();
+                    }
+
+                    // now run the requested sequence for the target module
+                    await WithTimeout(targetModule.LockAsync(session), TimeSpan.FromSeconds(10));
+                    UAClient.Common.Log.Info($"Starting module {targetModule.Name} (startup skill)");
+                    // give more time for startup/reset on slower servers
+                    await WithTimeout(targetModule.StartAsync(reset: true, timeout: TimeSpan.FromSeconds(60)), TimeSpan.FromSeconds(70));
+
+                    // --- Test: read Monitoring variables of Robot component and set SpeedOverride to 50 ---
+                    try
+                    {
+                        // attempt to find a Robot component in discovered methods
+                        if (targetModule.Methods.TryGetValue("Robot", out var robotObj))
+                        {
+                            UAClient.Common.Log.Info("Found Robot component, collecting Monitoring variables...");
+                            var nodeMap = new System.Collections.Generic.Dictionary<NodeId, UAClient.Client.RemoteVariable>();
+                            var nameMap = new System.Collections.Generic.Dictionary<string, UAClient.Client.RemoteVariable>(StringComparer.OrdinalIgnoreCase);
+                            // find Monitoring child first
+                            var session2 = client.Session ?? throw new InvalidOperationException("No session");
+                            var browser = new Browser(session2)
+                            {
+                                BrowseDirection = BrowseDirection.Forward,
+                                ReferenceTypeId = ReferenceTypeIds.HierarchicalReferences,
+                                NodeClassMask = (int)(NodeClass.Object | NodeClass.Variable | NodeClass.Method)
+                            };
+                            ReferenceDescriptionCollection refs = null;
+                            try { refs = await browser.BrowseAsync(robotObj.BaseNodeId); } catch { }
+                            NodeId? monitoringNode = null;
+                            if (refs != null)
+                            {
+                                foreach (var r in refs)
+                                {
+                                    try
+                                    {
+                                        var name = r.DisplayName?.Text ?? r.BrowseName?.Name ?? "";
+                                        if (string.Equals(name, "Monitoring", StringComparison.OrdinalIgnoreCase))
+                                        {
+                                            var expanded = r.NodeId as ExpandedNodeId ?? new ExpandedNodeId(r.NodeId);
+                                            monitoringNode = UaHelpers.ToNodeId(expanded, session2);
+                                            break;
+                                        }
+                                    }
+                                    catch { }
+                                }
+                            }
+
+                            if (monitoringNode != null)
+                            {
+                                // Next: attempt to run MoveToJointPosition on Robot with given joint values
+                                try
+                                {
+                                        var moveSkill = targetModule.Methods.Values.OfType<Client.RemoteSkill>().FirstOrDefault(s => s.Name.IndexOf("MoveToJointPosition", StringComparison.OrdinalIgnoreCase) >= 0);
+                                        if (moveSkill != null)
+                                        {
+                                            UAClient.Common.Log.Info($"Found skill {moveSkill.Name}, preparing to execute MoveToJointPosition on Robot");
+
+                                            // ensure subscriptions for the skill itself (FinalResultData)
+                                            var skillSubForMove = new Client.SubscriptionManager(client);
+                                            await WithTimeout(moveSkill.SetupSubscriptionsAsync(skillSubForMove, true), TimeSpan.FromSeconds(10));
+
+                                            // create a subscription manager for Robot monitoring variables (if we found monitoringNode above)
+                                            if (monitoringNode != null)
+                                            {
+                                                var monSub = new Client.SubscriptionManager(client);
+                                                foreach (var kv in nameMap)
+                                                {
+                                                    var nodeId = kv.Value.NodeId;
+                                                    // add monitored item that prints value changes
+                                                    try
+                                                    {
+                                                        await monSub.AddMonitoredItemAsync(nodeId, (m, e) =>
+                                                        {
+                                                            // fire-and-forget read to avoid blocking the notification thread
+                                                            _ = Task.Run(async () =>
+                                                            {
+                                                                try
+                                                                {
+                                                                    var dv = await (client.Session ?? throw new InvalidOperationException("No session")).ReadValueAsync(nodeId);
+                                                                    Console.WriteLine($"[Monitoring] {kv.Key} = {dv.Value}");
+                                                                }
+                                                                catch { }
+                                                            });
+                                                        });
+                                                    }
+                                                    catch { }
+                                                }
+
+                                                // prepare parameters
+                                                var parameters = new System.Collections.Generic.Dictionary<string, object?>()
+                                                {
+                                                    ["SAxisPosition"] = 54.78,
+                                                    ["UAxisPosition"] = 84.35,
+                                                    ["TAxisPosition"] = 23.67
+                                                };
+
+                                                UAClient.Common.Log.Info($"Starting MoveToJointPosition with parameters: SAxis={parameters["SAxisPosition"]}, UAxis={parameters["UAxisPosition"]}, TAxis={parameters["TAxisPosition"]}");
+
+                                                // execute skill and wait for completion (longer timeout)
+                                                var result = await WithTimeout(moveSkill.ExecuteAsync(parameters, waitForCompletion: true, resetAfterCompletion: true, resetBeforeIfHalted: true, timeout: TimeSpan.FromSeconds(120), subscriptionManager: monSub), TimeSpan.FromSeconds(140));
+
+                                                Console.WriteLine("MoveToJointPosition completed. FinalResultData:");
+                                                if (result != null)
+                                                {
+                                                    foreach (var kv2 in result) Console.WriteLine($"  {kv2.Key} = {kv2.Value}");
+                                                }
+
+                                                // dispose monitoring subscription
+                                                try { await monSub.DisposeAsync(); } catch { }
+                                            }
+                                            else
+                                            {
+                                                UAClient.Common.Log.Warn("No Robot Monitoring node available — executing skill without Robot-monitoring prints");
+                                                var parameters = new System.Collections.Generic.Dictionary<string, object?>()
+                                                {
+                                                    ["SAxisPosition"] = -54.78,
+                                                    ["UAxisPosition"] = 84.35,
+                                                    ["TAxisPosition"] = 23.67
+                                                };
+                                                var skillSubNoMon = new Client.SubscriptionManager(client);
+                                                await WithTimeout(moveSkill.SetupSubscriptionsAsync(skillSubNoMon, true), TimeSpan.FromSeconds(10));
+                                                var result = await WithTimeout(moveSkill.ExecuteAsync(parameters, waitForCompletion: true, resetAfterCompletion: true, resetBeforeIfHalted: true, timeout: TimeSpan.FromSeconds(120), subscriptionManager: skillSubNoMon), TimeSpan.FromSeconds(140));
+                                                Console.WriteLine("MoveToJointPosition completed (no monitoring). FinalResultData:");
+                                                if (result != null)
+                                                {
+                                                    foreach (var kv2 in result) Console.WriteLine($"  {kv2.Key} = {kv2.Value}");
+                                                }
+                                            }
+                                        }
+                                        else
+                                        {
+                                            UAClient.Common.Log.Info("MoveToJointPosition skill not found in module");
+                                        }
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        UAClient.Common.Log.Warn($"Executing MoveToJointPosition failed: {ex.Message}");
+                                    }
+                                Console.WriteLine($"Robot Monitoring variables ({nameMap.Count}):");
+                                foreach (var kvv in nameMap) Console.WriteLine($"  {kvv.Key} = {kvv.Value.Value}");
+
+                                // try to set SpeedOverride to 50 if present (search by name)
+                                if (nameMap.TryGetValue("SpeedOverride", out var speedVar))
+                                {
+                                    try
+                                    {
+                                        UAClient.Common.Log.Info($"Writing SpeedOverride -> 50 at {speedVar.NodeId}");
+                                        await WithTimeout(client.WriteNodeAsync(speedVar.NodeId.ToString(), 50), TimeSpan.FromSeconds(10));
+                                        var newVal = await WithTimeout(client.ReadNodeAsync(speedVar.NodeId.ToString()), TimeSpan.FromSeconds(10));
+                                        Console.WriteLine($"After write: SpeedOverride = {newVal}");
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        Console.WriteLine($"Failed to write SpeedOverride: {ex.Message}");
+                                    }
+                                }
+                                else
+                                {
+                                    Console.WriteLine("SpeedOverride variable not found under Robot Monitoring");
+                                }
+                            }
+                            else
+                            {
+                                Console.WriteLine("Monitoring node not found under Robot component");
+                            }
+                        }
+                        else
+                        {
+                            UAClient.Common.Log.Info("Robot component not found in module methods");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        UAClient.Common.Log.Warn($"Robot monitoring test failed: {ex.Message}");
+                    }
+
+
+                }
+
+                // Quick read/write test for storages: attempt to read first storage variable and write if writable
+                foreach (var kv in server.Modules)
+                {
+                    foreach (var s in kv.Value.Storages)
+                    {
+                        var storage = s.Value;
+                        Console.WriteLine($"Inspecting storage {s.Key} with {storage.Variables.Count} variables");
+                        foreach (var varKv in storage.Variables)
+                        {
+                            Console.WriteLine($"  Var {varKv.Key} = {varKv.Value.Value} (writable={varKv.Value.IsWritable})");
+                            if (varKv.Value.IsWritable)
+                            {
+                                try
+                                {
+                                    Console.WriteLine($"  Writing test value to {varKv.Key}");
+                                    // attempt to write a simple value depending on type
+                                        if (client != null)
+                                        {
+                                            try
+                                            {
+                                                await WithTimeout(client.WriteNodeAsync(varKv.Value.NodeId.ToString(), varKv.Value.Value ?? ""), TimeSpan.FromSeconds(10));
+                                                var dv = await WithTimeout(client.ReadNodeAsync(varKv.Value.NodeId.ToString()), TimeSpan.FromSeconds(10));
+                                                Console.WriteLine($"  After write: {dv}");
+                                            }
+                                            catch (Exception ex)
+                                            {
+                                                Console.WriteLine($"  Write/Read timed out or failed: {ex}");
+                                            }
+                                        }
+                                }
+                                catch (Exception ex)
+                                {
+                                    Console.WriteLine($"  Write failed: {ex.Message}");
+                                }
+                            }
+                        }
+                    }
+                }
+
+                
+
+                
+
+                await client.DisconnectAsync();
+                Console.WriteLine("Disconnected.");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine(ex);
+                return 1;
+            }
+        }
+    }
+}

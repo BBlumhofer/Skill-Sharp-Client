@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="../BenchmarkSuite1/BenchmarkSuite1.csproj" />
+  <Project Path="UAClient.Tests/UAClient.Tests.csproj" />
+  <Project Path="UAClient/UAClient.csproj" />
+</Solution>

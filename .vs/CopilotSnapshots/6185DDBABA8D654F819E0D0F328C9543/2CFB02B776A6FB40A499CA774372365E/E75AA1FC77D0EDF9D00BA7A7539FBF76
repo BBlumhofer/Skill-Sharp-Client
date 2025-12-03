@@ -1,0 +1,553 @@
+﻿using System;
+using System.Collections.Generic;
+using Opc.Ua;
+using Opc.Ua.Client;
+using System.Linq;
+
+namespace UAClient.Client
+{
+    public class RemoteModule
+    {
+        // If true, allow falling back to the first discovered Lock object when no
+        // explicit Lock candidate was found. Default is false (strict mode).
+        public bool AllowLockFallback { get; set; } = false;
+
+        public string Name { get; }
+        public NodeId BaseNodeId { get; }
+        public IDictionary<string, BaseRemoteCallable> Methods { get; } = new Dictionary<string, BaseRemoteCallable>();
+        public IDictionary<string, RemoteLock> Locks { get; } = new Dictionary<string, RemoteLock>();
+        public IDictionary<string, RemotePort> Ports { get; } = new Dictionary<string, RemotePort>();
+        public IDictionary<string, RemoteStorage> Storages { get; } = new Dictionary<string, RemoteStorage>();
+        private UaClient _client;
+        private RemoteServer _remoteServer;
+
+        public RemoteModule(string name, NodeId baseNodeId, UaClient client, RemoteServer remoteServer)
+        {
+            Name = name;
+            BaseNodeId = baseNodeId;
+            _client = client;
+            _remoteServer = remoteServer;
+        }
+
+        public async System.Threading.Tasks.Task DiscoverMethodsAsync()
+        {
+            var session = _client.Session;
+            if (session == null) return;
+
+            // create a per-module SubscriptionManager so discovered objects can auto-subscribe during discovery
+            SubscriptionManager? moduleSub = null;
+            try { moduleSub = new SubscriptionManager(_client); } catch { moduleSub = null; }
+
+            var visited = new System.Collections.Concurrent.ConcurrentDictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+            var queue = new System.Collections.Concurrent.ConcurrentQueue<NodeId>();
+            queue.Enqueue(BaseNodeId);
+            var dictLock = new object();
+
+            while (queue.TryDequeue(out var node))
+            {
+                if (node == null) continue;
+                var nodeKey = node.ToString();
+                if (!visited.TryAdd(nodeKey, true)) continue;
+
+                var browser = new Browser(session)
+                {
+                    BrowseDirection = BrowseDirection.Forward,
+                    ReferenceTypeId = ReferenceTypeIds.HierarchicalReferences,
+                    NodeClassMask = (int)(NodeClass.Object | NodeClass.Variable | NodeClass.Method)
+                };
+                ReferenceDescriptionCollection refs = null;
+                try { refs = await browser.BrowseAsync(node); } catch { }
+                if (refs == null) continue;
+
+                var tasks = new System.Collections.Generic.List<System.Threading.Tasks.Task>();
+                foreach (var r in refs)
+                {
+                    // process each child reference in parallel
+                    tasks.Add(System.Threading.Tasks.Task.Run(async () =>
+                    {
+                        try
+                        {
+                            if (r?.NodeId == null) return;
+                            var expanded = r.NodeId as ExpandedNodeId ?? new ExpandedNodeId(r.NodeId);
+                            var childId = UaHelpers.ToNodeId(expanded, session);
+                            if (childId == null) return;
+                            var name = r.DisplayName?.Text ?? childId.ToString() ?? "<unknown>";
+                            var browseName = r.BrowseName?.Name ?? "";
+
+                            UAClient.Common.Log.Debug($"RemoteModule '{Name}': discovered child {name} (browse='{browseName}') of class {r.NodeClass}");
+
+                            // If this is a SkillSet container, enumerate children and create skills
+                            if (string.Equals(browseName, "SkillSet", StringComparison.OrdinalIgnoreCase) || string.Equals(name, "SkillSet", StringComparison.OrdinalIgnoreCase))
+                            {
+                                try
+                                {
+                                    var browser2 = new Browser(session)
+                                    {
+                                        BrowseDirection = BrowseDirection.Forward,
+                                        ReferenceTypeId = ReferenceTypeIds.HierarchicalReferences,
+                                        NodeClassMask = (int)(NodeClass.Object | NodeClass.Variable | NodeClass.Method)
+                                    };
+                                    var refs2 = await browser2.BrowseAsync(childId);
+                                    if (refs2 != null)
+                                    {
+                                        foreach (var r2 in refs2)
+                                        {
+                                            try
+                                            {
+                                                if (r2?.NodeId == null) continue;
+                                                var expanded2 = r2.NodeId as ExpandedNodeId ?? new ExpandedNodeId(r2.NodeId);
+                                                var childSkillId = UaHelpers.ToNodeId(expanded2, session);
+                                                if (childSkillId == null) continue;
+                                                var childName = r2.DisplayName?.Text ?? r2.BrowseName?.Name ?? childSkillId.ToString();
+                                                // skip type-definition nodes like SkillSetType which are not actual skills
+                                                if (string.Equals(childName, "SkillSetType", StringComparison.OrdinalIgnoreCase))
+                                                {
+                                                    UAClient.Common.Log.Debug($"RemoteModule '{Name}': skipping type node {childName}");
+                                                    continue;
+                                                }
+                                                UAClient.Common.Log.Info($"RemoteModule '{Name}': creating RemoteSkill for {childName}");
+                                                lock (dictLock)
+                                                {
+                                                    Methods[childName] = new RemoteMethod(childName, childSkillId, _client);
+                                                    Methods[$"skill:{childName}"] = new RemoteSkill(childName, childSkillId, _client, _remoteServer);
+                                                }
+                                                // auto-setup subscriptions for the newly created skills/methods
+                                                try { if (Methods.TryGetValue(childName, out var m)) await m.SetupSubscriptionsAsync(moduleSub, true); } catch { }
+                                                try { if (Methods.TryGetValue($"skill:{childName}", out var s)) await s.SetupSubscriptionsAsync(moduleSub, true); } catch { }
+
+                                                // also enqueue child for deeper discovery
+                                                queue.Enqueue(childSkillId);
+                                            }
+                                            catch { }
+                                        }
+                                    }
+                                }
+                                catch { }
+                                return;
+                            }
+
+                            // Heuristics based on browse name and display name
+                            if (browseName.IndexOf("Skill", StringComparison.OrdinalIgnoreCase) >= 0 || name.IndexOf("Skill", StringComparison.OrdinalIgnoreCase) >= 0)
+                            {
+                                UAClient.Common.Log.Info($"RemoteModule '{Name}': creating RemoteSkill for {name}");
+                                lock (dictLock)
+                                {
+                                    Methods[name] = new RemoteMethod(name, childId, _client); // compatibility
+                                    Methods[$"skill:{name}"] = new RemoteSkill(name, childId, _client, _remoteServer);
+                                }
+                                // auto-subscribe
+                                try { await Methods[name].SetupSubscriptionsAsync(moduleSub, true); } catch { }
+                                try { await Methods[$"skill:{name}"].SetupSubscriptionsAsync(moduleSub, true); } catch { }
+                            }
+                            else if (browseName.IndexOf("Lock", StringComparison.OrdinalIgnoreCase) >= 0 || name.IndexOf("Lock", StringComparison.OrdinalIgnoreCase) >= 0)
+                            {
+                                UAClient.Common.Log.Info($"RemoteModule '{Name}': detected Lock '{name}'");
+                                var lockObj = new RemoteLock(name, childId);
+                                // gather variables under the lock node
+                                await RemoteVariableCollector.AddVariableNodesAsync(session, childId, lockObj.NodeMap, lockObj.Variables, true);
+                                // create and populate a lightweight descriptor with standardized NodeIds when possible
+                                var desc = new RemoteLockDescriptor { BaseNodeId = childId };
+                                // also enumerate immediate children to attach methods/skills to this lock (so owner has local methods)
+                                try
+                                {
+                                    var browserLock = new Browser(session)
+                                    {
+                                        BrowseDirection = BrowseDirection.Forward,
+                                        ReferenceTypeId = ReferenceTypeIds.HierarchicalReferences,
+                                        NodeClassMask = (int)(NodeClass.Object | NodeClass.Variable | NodeClass.Method)
+                                    };
+                                    var refsLock = await browserLock.BrowseAsync(childId);
+                                    if (refsLock != null)
+                                    {
+                                        foreach (var rLock in refsLock)
+                                        {
+                                            try
+                                            {
+                                                if (rLock?.NodeId == null) continue;
+                                                var expandedLock = rLock.NodeId as ExpandedNodeId ?? new ExpandedNodeId(rLock.NodeId);
+                                                var mId = UaHelpers.ToNodeId(expandedLock, session);
+                                                if (mId == null) continue;
+                                                var mName = rLock.DisplayName?.Text ?? rLock.BrowseName?.Name ?? mId.ToString();
+                                                lock (dictLock)
+                                                {
+                                                    var rm = new RemoteMethod(mName, mId, _client);
+                                                    lockObj.Methods[mName] = rm;
+                                                    lockObj.MethodsNodeMap[mId] = rm;
+                                                    Methods[mName] = rm;
+                                                    // map common lock method names into descriptor
+                                                    if (mName.IndexOf("InitLock", StringComparison.OrdinalIgnoreCase) >= 0) desc.InitLock = mId;
+                                                    if (mName.IndexOf("BreakLock", StringComparison.OrdinalIgnoreCase) >= 0) desc.BreakLock = mId;
+                                                    if (mName.IndexOf("ExitLock", StringComparison.OrdinalIgnoreCase) >= 0) desc.ExitLock = mId;
+                                                    if (mName.IndexOf("RenewLock", StringComparison.OrdinalIgnoreCase) >= 0) desc.RenewLock = mId;
+                                                    // Also set convenience properties on the lock object for discovered methods
+                                                    if (mName.IndexOf("InitLock", StringComparison.OrdinalIgnoreCase) >= 0) lockObj.InitLock = rm;
+                                                    if (mName.IndexOf("BreakLock", StringComparison.OrdinalIgnoreCase) >= 0) lockObj.BreakLock = rm;
+                                                    if (mName.IndexOf("ExitLock", StringComparison.OrdinalIgnoreCase) >= 0) lockObj.ExitLock = rm;
+                                                    if (mName.IndexOf("RenewLock", StringComparison.OrdinalIgnoreCase) >= 0) lockObj.RenewLock = rm;
+                                                    if (mName.IndexOf("Skill", StringComparison.OrdinalIgnoreCase) >= 0)
+                                                    {
+                                                        var rs = new RemoteSkill(mName, mId, _client, _remoteServer);
+                                                        lockObj.Methods[$"skill:{mName}"] = rs;
+                                                        lockObj.MethodsNodeMap[mId] = rs;
+                                                        Methods[$"skill:{mName}"] = rs;
+                                                    }
+                                                }
+                                                queue.Enqueue(mId);
+                                            }
+                                            catch { }
+                                        }
+                                    }
+                                }
+                                catch { }
+                                // also try to map variables into descriptor (standard names) and set convenience properties
+                                try
+                                {
+                                    foreach (var kv in lockObj.Variables)
+                                    {
+                                        var key = kv.Key ?? "";
+                                        var nid = kv.Value.NodeId;
+                                        if (key.IndexOf("Locked", StringComparison.OrdinalIgnoreCase) >= 0) desc.Locked = nid;
+                                        if (key.IndexOf("LockingUser", StringComparison.OrdinalIgnoreCase) >= 0) desc.LockingUser = nid;
+                                        if (key.IndexOf("LockingClient", StringComparison.OrdinalIgnoreCase) >= 0) desc.LockingClient = nid;
+                                        if (key.IndexOf("RemainingLockTime", StringComparison.OrdinalIgnoreCase) >= 0) desc.RemainingLockTime = nid;
+                                        if (key.IndexOf("CurrentState", StringComparison.OrdinalIgnoreCase) >= 0 || key.IndexOf("State", StringComparison.OrdinalIgnoreCase) >= 0) desc.CurrentState = nid;
+                                    }
+                                    // set convenience properties from the Variables map if present
+                                    if (lockObj.Variables.TryGetValue("Locked", out var rvLocked)) lockObj.Locked = rvLocked;
+                                    if (lockObj.Variables.TryGetValue("LockingUser", out var rvUser)) lockObj.LockingUser = rvUser;
+                                    if (lockObj.Variables.TryGetValue("LockingClient", out var rvClient)) lockObj.LockingClient = rvClient;
+                                    if (lockObj.Variables.TryGetValue("RemainingLockTime", out var rvRemaining)) lockObj.RemainingLockTime = rvRemaining;
+                                    if (lockObj.Variables.TryGetValue("CurrentState", out var rvState)) lockObj.CurrentState = rvState;
+                                }
+                                catch { }
+                                lock (dictLock) { lockObj.Descriptor = desc; Locks[name] = lockObj; }
+                                // auto-subscribe lock (variables + methods)
+                                try { await lockObj.EnsureSubscriptionsAsync(moduleSub, _client); } catch { }
+                            }
+                            else if (browseName.IndexOf("Port", StringComparison.OrdinalIgnoreCase) >= 0 || name.IndexOf("Port", StringComparison.OrdinalIgnoreCase) >= 0)
+                            {
+                                UAClient.Common.Log.Info($"RemoteModule '{Name}': detected Port '{name}'");
+                                var port = new RemotePort(name, childId, this);
+                                await RemoteVariableCollector.AddVariableNodesAsync(session, childId, port.NodeMap, port.Variables, true);
+                                // attach any method/skill nodes directly under the port to the port's local Methods map
+                                try
+                                {
+                                    var browser3 = new Browser(session)
+                                    {
+                                        BrowseDirection = BrowseDirection.Forward,
+                                        ReferenceTypeId = ReferenceTypeIds.HierarchicalReferences,
+                                        NodeClassMask = (int)(NodeClass.Object | NodeClass.Variable | NodeClass.Method)
+                                    };
+                                    var refs3 = await browser3.BrowseAsync(childId);
+                                    if (refs3 != null)
+                                    {
+                                        foreach (var r3 in refs3)
+                                        {
+                                            try
+                                            {
+                                                if (r3?.NodeId == null) continue;
+                                                var expanded3 = r3.NodeId as ExpandedNodeId ?? new ExpandedNodeId(r3.NodeId);
+                                                var methodId = UaHelpers.ToNodeId(expanded3, session);
+                                                if (methodId == null) continue;
+                                                var methodName = r3.DisplayName?.Text ?? r3.BrowseName?.Name ?? methodId.ToString();
+                                                // create method/skill wrappers and attach to port and module indices
+                                                lock (dictLock)
+                                                {
+                                                    // always add a RemoteMethod for compatibility
+                                                    var rm = new RemoteMethod(methodName, methodId, _client);
+                                                    port.Methods[methodName] = rm;
+                                                    port.MethodsNodeMap[methodId] = rm;
+                                                    Methods[methodName] = rm;
+                                                    if (methodName.IndexOf("Skill", StringComparison.OrdinalIgnoreCase) >= 0)
+                                                    {
+                                                        var rs = new RemoteSkill(methodName, methodId, _client, _remoteServer);
+                                                        port.Methods[$"skill:{methodName}"] = rs;
+                                                        port.MethodsNodeMap[methodId] = rs;
+                                                        Methods[$"skill:{methodName}"] = rs;
+                                                    }
+                                                }
+                                                // enqueue child for deeper discovery
+                                                queue.Enqueue(methodId);
+                                            }
+                                            catch { }
+                                        }
+                                    }
+                                }
+                                catch { }
+                                lock (dictLock) { Ports[name] = port; }
+                                // auto-subscribe port variables and attached methods
+                                try { await port.SetupSubscriptionsAsync(moduleSub); } catch { }
+                            }
+                            else if (browseName.IndexOf("Storage", StringComparison.OrdinalIgnoreCase) >= 0 || name.IndexOf("Storage", StringComparison.OrdinalIgnoreCase) >= 0)
+                            {
+                                UAClient.Common.Log.Info($"RemoteModule '{Name}': detected Storage '{name}'");
+                                var storage = new RemoteStorage(name, childId);
+                                await RemoteVariableCollector.AddVariableNodesAsync(session, childId, storage.NodeMap, storage.Variables, true);
+                                lock (dictLock) { Storages[name] = storage; }
+                                // auto-subscribe storage variables
+                                try { await storage.SetupSubscriptionsAsync(moduleSub, _client); } catch { }
+                            }
+                            else
+                            {
+                                // generic method/object — create a RemoteMethod entry to allow invocation
+                                lock (dictLock) { Methods[name] = new RemoteMethod(name, childId, _client); }
+                                // auto-subscribe methods
+                                try { await Methods[name].SetupSubscriptionsAsync(moduleSub, true); } catch { }
+                            }
+
+                            // enqueue objects and variables for deeper traversal
+                            if (r.NodeClass == NodeClass.Object || r.NodeClass == NodeClass.Variable)
+                            {
+                                queue.Enqueue(childId);
+                            }
+                        }
+                        catch { }
+                    }));
+                }
+
+                // await processing of this batch of children
+                try { await System.Threading.Tasks.Task.WhenAll(tasks); } catch { }
+            }
+
+            // dispose module subscription manager if created (we expect callers may reuse a different manager later)
+            try { if (moduleSub != null) await moduleSub.DisposeAsync(); } catch { }
+        }
+
+        public async System.Threading.Tasks.Task SetupSubscriptionsAsync(SubscriptionManager? subscriptionManager = null, bool createSubscriptions = true)
+        {
+            // ensure methods discovered
+            await DiscoverMethodsAsync();
+
+            // create a SubscriptionManager if caller didn't provide one
+            if (subscriptionManager == null)
+            {
+                try { subscriptionManager = new SubscriptionManager(_client); }
+                catch { /* if creation fails, continue without subscriptions */ }
+            }
+
+            foreach (var m in Methods.Values)
+            {
+                try { await m.SetupSubscriptionsAsync(subscriptionManager, true); } catch { }
+            }
+            // Also subscribe to module variables (Locks, Ports, Storages) similar to pyuaadapter
+            try
+            {
+                // Locks
+                foreach (var l in Locks.Values)
+                {
+                    // inject client into lock variables
+                    foreach (var lv in l.Variables.Values) lv.SetClient(_client);
+                    foreach (var kv in l.Variables.Values)
+                    {
+                        try { await kv.SetupSubscriptionAsync(subscriptionManager); } catch { }
+                    }
+                }
+
+                // Ports
+                foreach (var p in Ports.Values)
+                {
+                    foreach (var pv in p.Variables.Values) pv.SetClient(_client);
+                    foreach (var kv in p.Variables.Values)
+                    {
+                        try { await kv.SetupSubscriptionAsync(subscriptionManager); } catch { }
+                    }
+                }
+
+                // Storages
+                foreach (var s in Storages.Values)
+                {
+                    foreach (var sv in s.Variables.Values) sv.SetClient(_client);
+                    foreach (var kv in s.Variables.Values)
+                    {
+                        try { await kv.SetupSubscriptionAsync(subscriptionManager); } catch { }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                UAClient.Common.Log.Warn($"SetupSubscriptionsAsync: failed to subscribe variables: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Ensure the module's first port is coupled. This checks the couple skill state and starts it if needed.
+        /// </summary>
+        public async System.Threading.Tasks.Task CoupleAsync(TimeSpan? timeout = null)
+        {
+            timeout ??= TimeSpan.FromSeconds(30);
+            try
+            {
+                if (Ports.Count == 0) return;
+                var firstPort = Ports.Values.First();
+                var isCoupled = await firstPort.IsCoupledAsync(_client);
+                if (isCoupled)
+                {
+                    UAClient.Common.Log.Info($"Module '{Name}': first port '{firstPort.Name}' already coupled");
+                    return;
+                }
+                UAClient.Common.Log.Info($"Module '{Name}': coupling first port '{firstPort.Name}'");
+                await firstPort.CoupleAsync(_client, timeout);
+                UAClient.Common.Log.Info($"Module '{Name}': coupling attempt finished for port '{firstPort.Name}'");
+            }
+            catch (Exception ex)
+            {
+                UAClient.Common.Log.Warn($"Module '{Name}': CoupleAsync failed: {ex.Message}");
+            }
+        }
+
+        public async System.Threading.Tasks.Task<bool?> LockAsync(Session session)
+        {
+            if (session == null) return null;
+            if (Locks.Count == 0) return null;
+            // Prefer a lock named exactly 'Lock' or the LockingServices object; otherwise try to find the lock object
+            // that actually exposes an InitLock method.
+            RemoteLock? lockObj = null;
+            if (Locks.TryGetValue("Lock", out var namedLock))
+            {
+                lockObj = namedLock;
+            }
+            else
+            {
+                // find first candidate whose name contains 'Lock' (case-insensitive)
+                lockObj = Locks.Values.FirstOrDefault(l => l.Name != null && l.Name.IndexOf("Lock", StringComparison.OrdinalIgnoreCase) >= 0);
+            }
+            // If still not chosen, try to find one that actually contains an InitLock method (without calling it)
+            if (lockObj == null)
+            {
+                foreach (var cand in Locks.Values)
+                {
+                    try
+                    {
+                        if (await cand.HasMethodAsync(session, "InitLock", 3))
+                        {
+                            lockObj = cand;
+                            break;
+                        }
+                    }
+                    catch { }
+                }
+            }
+            // If we couldn't find a suitable lock candidate above, decide what to do:
+            if (lockObj == null)
+            {
+                if (Locks.Count == 1)
+                {
+                    // If there is exactly one Lock object, it's reasonable to use it.
+                    lockObj = Locks.Values.First();
+                    UAClient.Common.Log.Warn($"No explicit Lock candidate found; using the only discovered lock '{lockObj.Name}'");
+                }
+                else if (AllowLockFallback && Locks.Count > 0)
+                {
+                    // Backwards-compatible tolerant mode: fall back to first discovered lock.
+                    lockObj = Locks.Values.First();
+                    UAClient.Common.Log.Warn($"AllowLockFallback is enabled: falling back to first discovered lock '{lockObj.Name}'");
+                }
+                else
+                {
+                    UAClient.Common.Log.Warn($"No suitable lock found for module {Name}; aborting LockAsync (set AllowLockFallback=true to allow tolerant fallback)");
+                    return null;
+                }
+            }
+            UAClient.Common.Log.Info($"Locking module {Name} via lock {lockObj.Name}");
+            try
+            {
+                // diagnostics: enumerate lock node children before calling
+                UAClient.Common.Log.Debug($"RemoteModule '{Name}': invoking lock Init on {lockObj.Name} (node={lockObj.BaseNodeId})");
+                var initOk = await lockObj.InitLockAsync(session);
+                if (!initOk)
+                {
+                    UAClient.Common.Log.Warn($"RemoteModule '{Name}': InitLock call did not succeed (or no lock method found)");
+                }
+                // After attempting Init, poll the lock state until it's true or timeout
+                var waitTimeout = TimeSpan.FromSeconds(10);
+                var lockedNow = await lockObj.WaitForLockedAsync(session, waitTimeout);
+                var lockedText = lockedNow ? "true" : "false/timeout";
+                UAClient.Common.Log.Info($"Module locked state={lockedText}");
+                if (!lockedNow)
+                {
+                    UAClient.Common.Log.Warn($"Module lock not confirmed for {Name} after {waitTimeout.TotalSeconds}s");
+                }
+                return lockedNow;
+            }
+            catch (Exception ex)
+            {
+                UAClient.Common.Log.Warn($"Lock init failed: {ex.Message}");
+                return null;
+            }
+        }
+
+        public async System.Threading.Tasks.Task<bool?> UnlockAsync(Session session)
+        {
+            if (session == null) return null;
+            if (Locks.Count == 0) return null;
+            var lockObj = Locks.Values.First();
+            UAClient.Common.Log.Info($"Unlocking module {Name} via lock {lockObj.Name}");
+            try
+            {
+                await lockObj.ReleaseLockAsync(session);
+                var locked = await lockObj.IsLockedAsync(session);
+                var lockedText = locked.HasValue ? (locked.Value ? "true" : "false") : "unknown";
+                UAClient.Common.Log.Info($"Module locked state after unlock={lockedText}");
+                return locked;
+            }
+            catch (Exception ex)
+            {
+                UAClient.Common.Log.Warn($"Unlock failed: {ex.Message}");
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Start the module's startup skill. Optionally perform coupling first (default=true).
+        /// </summary>
+        public async System.Threading.Tasks.Task StartAsync(bool reset = true, TimeSpan? timeout = null, bool couple = true)
+        {
+            timeout ??= TimeSpan.FromSeconds(10);
+            // perform coupling first if requested
+            if (couple)
+            {
+                await CoupleAsync(timeout);
+            }
+            
+            var session = _client?.Session ?? throw new InvalidOperationException("No session");
+
+            var startupSkill = Methods.Values
+                .OfType<RemoteSkill>()
+                .FirstOrDefault(s => s.Name.IndexOf("Startup", StringComparison.OrdinalIgnoreCase) >= 0);
+            if (startupSkill == null)
+            {
+                UAClient.Common.Log.Info($"No startup skill found in module {Name}");
+                return;
+            }
+
+            var subMgr = new SubscriptionManager(_client);
+            await startupSkill.SetupSubscriptionsAsync(subMgr, true);
+
+            // get current state and do reset logging
+            var st = await startupSkill.GetStateAsync();
+            if (reset && (st == (int)UAClient.Common.SkillStates.Halted || st == (int)UAClient.Common.SkillStates.Completed))
+            {
+                UAClient.Common.Log.Info($"Resetting startup skill {startupSkill.Name} before start (state={st})");
+            }
+
+            if (st == null || st != (int)UAClient.Common.SkillStates.Running)
+            {
+                if (startupSkill.IsFinite)
+                {
+                    await startupSkill.ExecuteAsync(null, waitForCompletion: true, resetAfterCompletion: true, resetBeforeIfHalted: reset, timeout: TimeSpan.FromSeconds(60), subscriptionManager: subMgr);
+                    UAClient.Common.Log.Info($"Startup finite skill executed");
+                }
+                else
+                {
+                    await startupSkill.ExecuteAsync(null, waitForCompletion: false, resetBeforeIfHalted: reset, timeout: TimeSpan.FromSeconds(30), subscriptionManager: subMgr);
+                    var ok = await startupSkill.WaitForStateAsync(UAClient.Common.SkillStates.Running, TimeSpan.FromSeconds(30));
+                    UAClient.Common.Log.Info($"Startup skill reached Running={ok}");
+                }
+            }
+            else
+            {
+                UAClient.Common.Log.Warn($"Startup skill already running");
+            }
+        }
+    }
+}

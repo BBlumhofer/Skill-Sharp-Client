@@ -1,0 +1,126 @@
+﻿using System;
+using System.Collections.Generic;
+using Opc.Ua;
+using Opc.Ua.Client;
+
+namespace UAClient.Client
+{
+    public class RemoteVariableDto
+    {
+        public string Name { get; set; } = string.Empty;
+        public string NodeId { get; set; } = string.Empty;
+        public object? Value { get; set; }
+        public bool IsWritable { get; set; }
+        public string? UaDataType { get; set; }
+        public IDictionary<object, string>? ValidValues { get; set; }
+    }
+
+    public class RemoteVariable : IDataChangeHandler
+    {
+        public string Name { get; set; }
+        public NodeId NodeId { get; set; }
+        public object? Value { get; private set; }
+        public DateTime? Timestamp { get; private set; }
+        public bool IsWritable { get; set; }
+        public string UaDataType { get; set; } = "UNKNOWN";
+        public int UaValueRank { get; set; }
+        public IDictionary<object, string>? ValidValues { get; set; }
+        public Variant? LastVariant { get; private set; }
+        public IDictionary<string, RemoteVariable> Children { get; } = new Dictionary<string, RemoteVariable>();
+        public EUInformation? Unit { get; set; }
+        public Opc.Ua.Range? Range { get; set; }
+
+        // Synchronous write helper: blocks until write completes (or fails).
+        // Uses UaClient from a linked session/client reference (must be set externally or via subscription setup).
+        private UaClient? _client;
+        public void SetClient(UaClient client) => _client = client;
+
+        public RemoteVariable(string name, NodeId nodeId)
+        {
+            Name = name; NodeId = nodeId;
+        }
+
+        public async System.Threading.Tasks.Task SetupSubscriptionAsync(SubscriptionManager subscriptionManager)
+        {
+            if (subscriptionManager == null) return;
+            try
+            {
+                await subscriptionManager.SubscribeDataChangeAsync(this, new[] { NodeId });
+            }
+            catch (Exception ex)
+            {
+                UAClient.Common.Log.Warn($"RemoteVariable '{Name}': failed to subscribe: {ex.Message}");
+            }
+        }
+
+        // IDataChangeHandler implementation will be invoked by SubscriptionManager when a change occurs.
+        public void DataChangeNotification(NodeId nodeId, DataValue value, MonitoredItemNotificationEventArgs args)
+        {
+            try
+            {
+                if (value == null) return;
+                UpdateFromDataValue(value);
+            }
+            catch { }
+        }
+
+        public void UpdateFromDataValue(DataValue dv)
+        {
+            if (dv == null) return;
+            LastVariant = dv.Value as Variant? ?? new Variant(dv.Value);
+            Value = dv.Value;
+            Timestamp = dv.ServerTimestamp == DateTime.MinValue ? (DateTime?)null : dv.ServerTimestamp;
+        }
+
+        public RemoteVariableDto ToDto()
+        {
+            return new RemoteVariableDto
+            {
+                Name = Name,
+                NodeId = NodeId.ToString(),
+                Value = Value,
+                IsWritable = IsWritable,
+                UaDataType = UaDataType,
+                ValidValues = ValidValues
+            };
+        }
+
+        public async System.Threading.Tasks.Task<IList<TimestampedValue>> ReadHistoryAsync(Session session, DateTime? start = null, DateTime? end = null, uint numValues = 0)
+        {
+            var res = new List<TimestampedValue>();
+            // Note: this is a simplified placeholder; detailed history reading requires service calls
+            return res;
+        }
+
+        public void WriteValue(object value)
+        {
+            if (_client == null)
+                throw new InvalidOperationException($"RemoteVariable '{Name}': cannot write, no client reference set.");
+            try
+            {
+                // synchronous blocking write (use Task.Run or .GetAwaiter().GetResult() approach)
+                _client.WriteNodeAsync(NodeId.ToString(), value).GetAwaiter().GetResult();
+                // optionally update local cached value immediately (optimistic)
+                Value = value;
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException($"RemoteVariable '{Name}': write failed: {ex.Message}", ex);
+            }
+        }
+
+        public async System.Threading.Tasks.Task WriteValueAsync(object value)
+        {
+            if (_client == null)
+                throw new InvalidOperationException($"RemoteVariable '{Name}': cannot write, no client reference set.");
+            await _client.WriteNodeAsync(NodeId.ToString(), value);
+            Value = value;
+        }
+    }
+
+    public class TimestampedValue
+    {
+        public object? Value { get; set; }
+        public DateTime? Timestamp { get; set; }
+    }
+}

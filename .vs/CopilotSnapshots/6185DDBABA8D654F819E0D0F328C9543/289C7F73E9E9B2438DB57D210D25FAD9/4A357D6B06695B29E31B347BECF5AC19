@@ -1,0 +1,36 @@
+﻿using System;
+using Opc.Ua;
+using System.Threading.Tasks;
+
+namespace UAClient.Client
+{
+    public class RemoteStorage
+    {
+        public string Name { get; }
+        public NodeId BaseNodeId { get; }
+        public IDictionary<string, RemoteVariable> Variables { get; } = new Dictionary<string, RemoteVariable>();
+        public IDictionary<NodeId, RemoteVariable> NodeMap { get; } = new Dictionary<NodeId, RemoteVariable>();
+
+        public RemoteStorage(string name, NodeId baseNodeId)
+        {
+            Name = name;
+            BaseNodeId = baseNodeId;
+        }
+
+        public async Task SetupSubscriptionsAsync(SubscriptionManager? subscriptionManager, UaClient? client = null)
+        {
+            if (subscriptionManager == null && client != null)
+            {
+                try { subscriptionManager = new SubscriptionManager(client); } catch { subscriptionManager = null; }
+            }
+
+            if (subscriptionManager != null)
+            {
+                foreach (var rv in Variables.Values)
+                {
+                    try { await rv.SetupSubscriptionAsync(subscriptionManager); } catch { }
+                }
+            }
+        }
+    }
+}

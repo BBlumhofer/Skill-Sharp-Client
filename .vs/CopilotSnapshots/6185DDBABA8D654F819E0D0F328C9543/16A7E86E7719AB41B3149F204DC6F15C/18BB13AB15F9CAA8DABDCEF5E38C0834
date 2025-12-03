@@ -1,0 +1,67 @@
+﻿using System;
+using Opc.Ua;
+using System.Threading.Tasks;
+
+namespace UAClient.Client
+{
+    public class RemoteStorage
+    {
+        public string Name { get; }
+        public NodeId BaseNodeId { get; }
+        public IDictionary<string, RemoteVariable> Variables { get; } = new Dictionary<string, RemoteVariable>();
+        public IDictionary<NodeId, RemoteVariable> NodeMap { get; } = new Dictionary<NodeId, RemoteVariable>();
+        public IDictionary<string, RemoteStorageSlot> Slots { get; } = new Dictionary<string, RemoteStorageSlot>(StringComparer.OrdinalIgnoreCase);
+
+        public RemoteStorage(string name, NodeId baseNodeId)
+        {
+            Name = name;
+            BaseNodeId = baseNodeId;
+        }
+
+        // Expose current state as a property (read from Variables["CurrentState"] or similar)
+        public object? CurrentState
+        {
+            get
+            {
+                if (Variables.TryGetValue("CurrentState", out var stateVar))
+                {
+                    return stateVar.Value;
+                }
+                if (Variables.TryGetValue("State", out var altStateVar))
+                {
+                    return altStateVar.Value;
+                }
+                return null;
+            }
+        }
+
+        public async Task SetupSubscriptionsAsync(SubscriptionManager? subscriptionManager, UaClient? client = null)
+        {
+            if (subscriptionManager == null && client != null)
+            {
+                try { subscriptionManager = new SubscriptionManager(client); } catch { subscriptionManager = null; }
+            }
+
+            if (subscriptionManager != null)
+            {
+                foreach (var rv in Variables.Values)
+                {
+                    try { await rv.SetupSubscriptionAsync(subscriptionManager); } catch { }
+                }
+                // also subscribe variables of discovered slots
+                foreach (var slot in Slots.Values)
+                {
+                    try
+                    {
+                        foreach (var rv in slot.Variables.Values)
+                        {
+                            try { rv.SetClient(client ?? subscriptionManager.Client); } catch { }
+                            try { await rv.SetupSubscriptionAsync(subscriptionManager); } catch { }
+                        }
+                    }
+                    catch { }
+                }
+            }
+        }
+    }
+}

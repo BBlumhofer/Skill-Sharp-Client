@@ -1,0 +1,21 @@
+﻿using System;
+using Opc.Ua;
+using Opc.Ua.Client;
+
+namespace UAClient.Client
+{
+    public static class UaHelpers
+    {
+        public static NodeId ToNodeId(ExpandedNodeId expanded, Session session)
+        {
+            if (expanded == null) return NodeId.Null;
+            if (!expanded.IsAbsolute)
+            {
+                // NamespaceIndex is uint, NodeId expects ushort
+                var ns = (ushort)expanded.NamespaceIndex;
+                return new NodeId(expanded.Identifier, ns);
+            }
+            throw new NotSupportedException("Absolute ExpandedNodeId is not supported by this helper");
+        }
+    }
+}

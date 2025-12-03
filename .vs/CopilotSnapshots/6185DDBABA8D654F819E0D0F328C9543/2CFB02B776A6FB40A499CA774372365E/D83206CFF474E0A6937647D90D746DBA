@@ -1,0 +1,270 @@
+﻿using System;
+using System.Threading;
+using System.Threading.Tasks;
+using Opc.Ua;
+using Opc.Ua.Client;
+using UAClient.Client;
+using System.Diagnostics;
+
+namespace UAClient
+{
+    class Program
+    {
+        private static async Task WithTimeout(Task task, TimeSpan timeout)
+        {
+            var completed = await Task.WhenAny(task, Task.Delay(timeout));
+            if (completed == task)
+            {
+                await task; // propagate exceptions
+                return;
+            }
+            throw new TimeoutException($"Operation timed out after {timeout.TotalSeconds} seconds");
+        }
+
+        private static async Task<T> WithTimeout<T>(Task<T> task, TimeSpan timeout)
+        {
+            var completed = await Task.WhenAny(task, Task.Delay(timeout));
+            if (completed == task)
+            {
+                return await task; // propagate exceptions
+            }
+            throw new TimeoutException($"Operation timed out after {timeout.TotalSeconds} seconds");
+        }
+        static async Task<int> Main(string[] args)
+        {
+            // Install global handlers for unobserved/background exceptions to improve resilience
+            TaskScheduler.UnobservedTaskException += (s, e) =>
+            {
+                try
+                {
+                    UAClient.Common.Log.Warn($"UnobservedTaskException: {e.Exception?.Message}");
+                }
+                catch { }
+                e.SetObserved();
+            };
+            AppDomain.CurrentDomain.UnhandledException += (s, e) =>
+            {
+                try
+                {
+                    var ex = e.ExceptionObject as Exception;
+                    UAClient.Common.Log.Warn($"UnhandledException: {ex?.Message}");
+                }
+                catch { }
+            };
+
+            var url = args.Length > 0 ? args[0] : "opc.tcp://localhost:4842";
+            var username = args.Length > 1 ? args[1] : "orchestrator";
+            var password = args.Length > 2 ? args[2] : "orchestrator";
+
+            // use fully-qualified type to avoid namespace resolution issues
+            var client = new global::UAClient.Client.UaClient(url, username, password);
+            // shortcut: if fourth arg is --locktest, run the lock tester and exit
+            if (args.Length > 3 && args[3] == "--locktest")
+            {
+                return await Client.LockTest.Run(url, username, password, args.Length > 4 ? args[4] : "CA-Module");
+            }
+            try
+            {
+                // bound connect to avoid hangs
+                UAClient.Common.Log.Info("Connecting to OPC UA endpoint...");
+
+                var swTotal = Stopwatch.StartNew();
+
+                var swValidate = Stopwatch.StartNew();
+                // measure ValidateAsync indirectly by calling ConnectAsync which includes ValidateAsync
+                await WithTimeout(client.ConnectAsync(), TimeSpan.FromSeconds(90));
+                swValidate.Stop();
+                Console.WriteLine("Connected.");
+                Console.WriteLine($"[TIMING] Client.ConnectAsync (includes ValidateAsync, Discovery, Session) elapsed {swValidate.Elapsed.TotalMilliseconds} ms");
+
+                var server = new Client.RemoteServer(client);
+
+                // connect to remote server with timeout (increased to 90s for slow discovery + subscriptions)
+                UAClient.Common.Log.Info("Connecting to remote server and discovering modules...");
+                var swServer = Stopwatch.StartNew();
+                await WithTimeout(server.ConnectAsync(), TimeSpan.FromSeconds(90));
+                swServer.Stop();
+                Console.WriteLine($"Remote server status: {server.Status}");
+                Console.WriteLine($"[TIMING] RemoteServer.ConnectAsync elapsed {swServer.Elapsed.TotalMilliseconds} ms");
+
+                swTotal.Stop();
+                Console.WriteLine($"[TIMING] Total initialization elapsed {swTotal.Elapsed.TotalMilliseconds} ms");
+
+                Console.WriteLine("Discovered modules:");
+                /*foreach (var kv in server.Modules)
+                {
+                    Console.WriteLine($" - {kv.Key} (methods: {kv.Value.Methods.Count})");
+                    foreach (var m in kv.Value.Methods)
+                        Console.WriteLine($"    * {m.Key}");
+                    if (kv.Value.Locks.Count>0)
+                    {
+                        Console.WriteLine("    Locks:");
+                        foreach(var l in kv.Value.Locks) Console.WriteLine($"      - {l.Key}");
+                    }
+                    if (kv.Value.Ports.Count>0)
+                    {
+                        Console.WriteLine("    Ports:");
+                        foreach(var p in kv.Value.Ports) Console.WriteLine($"      - {p.Key}");
+                    }
+                    if (kv.Value.Storages.Count>0)
+                    {
+                        Console.WriteLine("    Storages:");
+                        foreach(var s in kv.Value.Storages) Console.WriteLine($"      - {s.Key}");
+                    }
+                }
+                */
+                // For each module, create RemoteComponent wrappers for discovered methods/objects
+                Console.WriteLine();
+                Console.WriteLine("Component-level discovery (per module):");
+                // Component discovery is now performed automatically by RemoteServer.ConnectAsync
+                // Access components via server.Components
+                // Wait briefly for components to be populated and copy into a mutable dictionary for fallback additions
+                var swComp = Stopwatch.StartNew();
+                while (server.Components.Count == 0 && swComp.Elapsed < TimeSpan.FromSeconds(5)) await Task.Delay(200);
+                var components = new System.Collections.Generic.Dictionary<string, Client.RemoteComponent>(server.Components, StringComparer.OrdinalIgnoreCase);
+                Console.WriteLine($"Discovered {components.Count} components:");
+                foreach (var kv in components)
+                {
+                    Console.WriteLine($"  {kv.Key}");
+                }
+
+                // Module lock/unlock handled via RemoteModule methods
+
+                
+
+                Client.RemoteModule? targetModule = null;
+                if (server.Modules.TryGetValue("CA-Module", out var foundModule))
+                {
+                    targetModule = foundModule;
+                }
+
+                if (targetModule != null)
+                {
+                    var session = client.Session ?? throw new InvalidOperationException("No session");
+                    UAClient.Common.Log.Info($"Mtying to lock Module");
+                    await WithTimeout(targetModule.LockAsync(session), TimeSpan.FromSeconds(10));
+                    UAClient.Common.Log.Info($"Module locked");
+
+
+
+
+
+                    UAClient.Common.Log.Info($"Starting module {targetModule.Name} (startup skill)");
+                    // give more time for startup/reset on slower servers
+                    await WithTimeout(targetModule.StartAsync(reset: true, timeout: TimeSpan.FromSeconds(60)), TimeSpan.FromSeconds(70));
+
+                    // --- Test: read Monitoring variables of Robot component and set SpeedOverride to 50 ---
+                    
+                    try
+                    {
+                        // Prefer using the discovered components dictionary instead of raw browses
+                        var compKey = $"{targetModule.Name}:Robot";
+                        if (!components.TryGetValue(compKey, out var robotComp))
+                        {
+                            // fallback: try just "Robot" in any module
+                            robotComp = components.Values.FirstOrDefault(c => string.Equals(c.Name, "Robot", StringComparison.OrdinalIgnoreCase));
+                            // if still not found, build component from module.Methods and subscribe
+                            if (robotComp == null && targetModule.Methods.TryGetValue("Robot", out var robotCallable))
+                            {
+                                UAClient.Common.Log.Info("Robot component not discovered automatically, creating on-demand from module.Methods");
+                                var rc = new Client.RemoteComponent("Robot", robotCallable.BaseNodeId, client, server);
+                                try { await rc.SetupSubscriptionsAsync(server.SubscriptionManager, true); } catch { }
+                                components[$"{targetModule.Name}:Robot"] = rc;
+                                robotComp = rc;
+                            }
+                        }
+
+                        if (robotComp != null)
+                        {
+                            UAClient.Common.Log.Info($"Found Robot component as {robotComp.Name}, using component wrapper.");
+
+                            // Use the component's Monitoring map populated by SetupSubscriptionsAsync
+                            if (robotComp.Monitoring.TryGetValue("SpeedOverride", out var speedVar))
+                            {
+                                try
+                                {
+                                    UAClient.Common.Log.Info($"Writing SpeedOverride -> 50 at {speedVar.NodeId}");
+                                    await speedVar.WriteValueAsync(50);
+                                    var newVal = speedVar.Value;
+                                    Console.WriteLine($"After write: SpeedOverride = {newVal}");
+                                }
+                                catch (Exception ex)
+                                {
+                                    Console.WriteLine($"Failed to write SpeedOverride: {ex.Message}");
+                                }
+                            }
+                            else
+                            {
+                                Console.WriteLine("SpeedOverride variable not found under Robot Monitoring (component)");
+                            }
+
+                            // Try to find and execute MoveToJointPosition skill attached to the same module
+                            var moveSkill = targetModule.Methods.Values.OfType<Client.RemoteSkill>().FirstOrDefault(s => s.Name.IndexOf("MoveToJointPosition", StringComparison.OrdinalIgnoreCase) >= 0);
+                            if (moveSkill != null)
+                            {
+                                UAClient.Common.Log.Info($"Found skill {moveSkill.Name}, preparing to execute MoveToJointPosition on Robot");
+                                // Write parameters directly using RemoteVariable.WriteValue
+                                var rnd = new Random();
+                                double RandAngle() => Math.Round(rnd.NextDouble() * 90.0 - 45.0, 2);
+                                try
+                                {
+                                    if (moveSkill.ParameterSet.TryGetValue("SAxisPosition", out var sAxis)) await sAxis.WriteValueAsync(RandAngle());
+                                    if (moveSkill.ParameterSet.TryGetValue("LAxisPosition", out var lAxis)) await lAxis.WriteValueAsync(RandAngle());
+                                    if (moveSkill.ParameterSet.TryGetValue("UAxisPosition", out var uAxis)) await uAxis.WriteValueAsync(RandAngle());
+                                    if (moveSkill.ParameterSet.TryGetValue("RAxisPosition", out var rAxis)) await rAxis.WriteValueAsync(RandAngle());
+                                    if (moveSkill.ParameterSet.TryGetValue("BAxisPosition", out var bAxis)) await bAxis.WriteValueAsync(RandAngle());
+                                    if (moveSkill.ParameterSet.TryGetValue("TAxisPosition", out var tAxis)) await tAxis.WriteValueAsync(RandAngle());
+                                }
+                                catch (Exception ex)
+                                {
+                                    UAClient.Common.Log.Warn($"Writing parameters failed: {ex.Message}");
+                                }
+
+                                // Execute skill without explicit subscription setup (already done in discovery)
+                                try
+                                {
+                                    var parameters = new System.Collections.Generic.Dictionary<string, object?>(); // empty, parameters already written
+                                    var result = await WithTimeout(moveSkill.ExecuteAsync(parameters, waitForCompletion: true, resetAfterCompletion: true, resetBeforeIfHalted: true, timeout: TimeSpan.FromSeconds(120), subscriptionManager: server.SubscriptionManager), TimeSpan.FromSeconds(140));
+                                    Console.WriteLine("MoveToJointPosition completed. FinalResultData:");
+                                    if (result != null)
+                                    {
+                                        foreach (var kv2 in result) Console.WriteLine($"  {kv2.Key} = {kv2.Value}");
+                                    }
+                                    // Alternative: read from skill.FinalResultData directly
+                                    Console.WriteLine("Via FinalResultData dict:");
+                                    foreach (var kv in moveSkill.FinalResultData)
+                                    {
+                                        Console.WriteLine($"  {kv.Key} = {kv.Value.Value}");
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    UAClient.Common.Log.Warn($"Executing MoveToJointPosition failed: {ex.Message}");
+                                }
+                            }
+                        }
+                        else
+                        {
+                            UAClient.Common.Log.Info("Robot component not found in discovered components");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        UAClient.Common.Log.Warn($"Robot monitoring test failed: {ex.Message}");
+                    }
+                }
+
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                UAClient.Common.Log.Error($"Exception in {nameof(Main)}: {ex.Message}");
+                return 1;
+            }
+            finally
+            {
+                try { await client.DisconnectAsync(); } catch { }
+            }
+        }
+    }
+}

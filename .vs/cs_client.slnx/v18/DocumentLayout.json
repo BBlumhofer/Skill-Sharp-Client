@@ -1,0 +1,175 @@
+{
+  "Version": 1,
+  "WorkspaceRootPath": "C:\\Users\\BenjaminBlumhofer\\source\\tmp\\pyuaadapter\\cs_client\\",
+  "Documents": [
+    {
+      "AbsoluteMoniker": "D:0:0:{1C20AB13-7089-DE3D-550E-99752D58A910}|UAClient\\UAClient.csproj|c:\\users\\benjaminblumhofer\\source\\tmp\\pyuaadapter\\cs_client\\uaclient\\program.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{1C20AB13-7089-DE3D-550E-99752D58A910}|UAClient\\UAClient.csproj|solutionrelative:uaclient\\program.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{32C735EE-2BF9-51BC-2D15-665A652497C0}|UAClient.Tests\\UAClient.Tests.csproj|c:\\users\\benjaminblumhofer\\source\\tmp\\pyuaadapter\\cs_client\\uaclient.tests\\fullintegrationtests.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{32C735EE-2BF9-51BC-2D15-665A652497C0}|UAClient.Tests\\UAClient.Tests.csproj|solutionrelative:uaclient.tests\\fullintegrationtests.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{1C20AB13-7089-DE3D-550E-99752D58A910}|UAClient\\UAClient.csproj|c:\\users\\benjaminblumhofer\\source\\tmp\\pyuaadapter\\cs_client\\uaclient\\client\\remotelock.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{1C20AB13-7089-DE3D-550E-99752D58A910}|UAClient\\UAClient.csproj|solutionrelative:uaclient\\client\\remotelock.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{1C20AB13-7089-DE3D-550E-99752D58A910}|UAClient\\UAClient.csproj|c:\\users\\benjaminblumhofer\\source\\tmp\\pyuaadapter\\cs_client\\uaclient\\client\\remotemodule.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{1C20AB13-7089-DE3D-550E-99752D58A910}|UAClient\\UAClient.csproj|solutionrelative:uaclient\\client\\remotemodule.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{1C20AB13-7089-DE3D-550E-99752D58A910}|UAClient\\UAClient.csproj|c:\\users\\benjaminblumhofer\\source\\tmp\\pyuaadapter\\cs_client\\uaclient\\client\\remotecomponent.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{1C20AB13-7089-DE3D-550E-99752D58A910}|UAClient\\UAClient.csproj|solutionrelative:uaclient\\client\\remotecomponent.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{32C735EE-2BF9-51BC-2D15-665A652497C0}|UAClient.Tests\\UAClient.Tests.csproj|c:\\users\\benjaminblumhofer\\source\\tmp\\pyuaadapter\\cs_client\\uaclient.tests\\modulelifecycletests.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{32C735EE-2BF9-51BC-2D15-665A652497C0}|UAClient.Tests\\UAClient.Tests.csproj|solutionrelative:uaclient.tests\\modulelifecycletests.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{32C735EE-2BF9-51BC-2D15-665A652497C0}|UAClient.Tests\\UAClient.Tests.csproj|c:\\users\\benjaminblumhofer\\source\\tmp\\pyuaadapter\\cs_client\\uaclient.tests\\remotelocktests.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{32C735EE-2BF9-51BC-2D15-665A652497C0}|UAClient.Tests\\UAClient.Tests.csproj|solutionrelative:uaclient.tests\\remotelocktests.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{32C735EE-2BF9-51BC-2D15-665A652497C0}|UAClient.Tests\\UAClient.Tests.csproj|c:\\users\\benjaminblumhofer\\source\\tmp\\pyuaadapter\\cs_client\\uaclient.tests\\subscriptionmanagertests.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{32C735EE-2BF9-51BC-2D15-665A652497C0}|UAClient.Tests\\UAClient.Tests.csproj|solutionrelative:uaclient.tests\\subscriptionmanagertests.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    }
+  ],
+  "DocumentGroupContainers": [
+    {
+      "Orientation": 1,
+      "VerticalTabListWidth": 256,
+      "DocumentGroups": [
+        {
+          "DockedHeight": 307,
+          "SelectedChildIndex": 4,
+          "Children": [
+            {
+              "$type": "Document",
+              "DocumentIndex": 7,
+              "Title": "SubscriptionManagerTests.cs",
+              "DocumentMoniker": "C:\\Users\\BenjaminBlumhofer\\source\\tmp\\pyuaadapter\\cs_client\\UAClient.Tests\\SubscriptionManagerTests.cs",
+              "RelativeDocumentMoniker": "UAClient.Tests\\SubscriptionManagerTests.cs",
+              "ToolTip": "C:\\Users\\BenjaminBlumhofer\\source\\tmp\\pyuaadapter\\cs_client\\UAClient.Tests\\SubscriptionManagerTests.cs",
+              "RelativeToolTip": "UAClient.Tests\\SubscriptionManagerTests.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2025-12-02T06:23:51.622Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 6,
+              "Title": "RemoteLockTests.cs",
+              "DocumentMoniker": "C:\\Users\\BenjaminBlumhofer\\source\\tmp\\pyuaadapter\\cs_client\\UAClient.Tests\\RemoteLockTests.cs",
+              "RelativeDocumentMoniker": "UAClient.Tests\\RemoteLockTests.cs",
+              "ToolTip": "C:\\Users\\BenjaminBlumhofer\\source\\tmp\\pyuaadapter\\cs_client\\UAClient.Tests\\RemoteLockTests.cs",
+              "RelativeToolTip": "UAClient.Tests\\RemoteLockTests.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2025-12-02T06:23:51.585Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 5,
+              "Title": "ModuleLifecycleTests.cs",
+              "DocumentMoniker": "C:\\Users\\BenjaminBlumhofer\\source\\tmp\\pyuaadapter\\cs_client\\UAClient.Tests\\ModuleLifecycleTests.cs",
+              "RelativeDocumentMoniker": "UAClient.Tests\\ModuleLifecycleTests.cs",
+              "ToolTip": "C:\\Users\\BenjaminBlumhofer\\source\\tmp\\pyuaadapter\\cs_client\\UAClient.Tests\\ModuleLifecycleTests.cs",
+              "RelativeToolTip": "UAClient.Tests\\ModuleLifecycleTests.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2025-12-02T06:23:51.548Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 4,
+              "Title": "RemoteComponent.cs",
+              "DocumentMoniker": "C:\\Users\\BenjaminBlumhofer\\source\\tmp\\pyuaadapter\\cs_client\\UAClient\\Client\\RemoteComponent.cs",
+              "RelativeDocumentMoniker": "UAClient\\Client\\RemoteComponent.cs",
+              "ToolTip": "C:\\Users\\BenjaminBlumhofer\\source\\tmp\\pyuaadapter\\cs_client\\UAClient\\Client\\RemoteComponent.cs",
+              "RelativeToolTip": "UAClient\\Client\\RemoteComponent.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2025-12-02T06:23:51.506Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 0,
+              "Title": "Program.cs",
+              "DocumentMoniker": "C:\\Users\\BenjaminBlumhofer\\source\\tmp\\pyuaadapter\\cs_client\\UAClient\\Program.cs",
+              "RelativeDocumentMoniker": "UAClient\\Program.cs",
+              "ToolTip": "C:\\Users\\BenjaminBlumhofer\\source\\tmp\\pyuaadapter\\cs_client\\UAClient\\Program.cs",
+              "RelativeToolTip": "UAClient\\Program.cs",
+              "ViewState": "AgIAAGUBAAAAAAAAAADwv4UBAAAgAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2025-11-30T14:50:57.36Z",
+              "IsPinned": true,
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 3,
+              "Title": "RemoteModule.cs",
+              "DocumentMoniker": "C:\\Users\\BenjaminBlumhofer\\source\\tmp\\pyuaadapter\\cs_client\\UAClient\\Client\\RemoteModule.cs",
+              "RelativeDocumentMoniker": "UAClient\\Client\\RemoteModule.cs",
+              "ToolTip": "C:\\Users\\BenjaminBlumhofer\\source\\tmp\\pyuaadapter\\cs_client\\UAClient\\Client\\RemoteModule.cs",
+              "RelativeToolTip": "UAClient\\Client\\RemoteModule.cs",
+              "ViewState": "AgIAAHQFAAAAAAAAAABBwAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2025-12-01T21:58:08.583Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 2,
+              "Title": "RemoteLock.cs",
+              "DocumentMoniker": "C:\\Users\\BenjaminBlumhofer\\source\\tmp\\pyuaadapter\\cs_client\\UAClient\\Client\\RemoteLock.cs",
+              "RelativeDocumentMoniker": "UAClient\\Client\\RemoteLock.cs",
+              "ToolTip": "C:\\Users\\BenjaminBlumhofer\\source\\tmp\\pyuaadapter\\cs_client\\UAClient\\Client\\RemoteLock.cs",
+              "RelativeToolTip": "UAClient\\Client\\RemoteLock.cs",
+              "ViewState": "AgIAADsBAAAAAAAAAABRwAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2025-12-01T21:57:02.996Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 1,
+              "Title": "FullIntegrationTests.cs",
+              "DocumentMoniker": "C:\\Users\\BenjaminBlumhofer\\source\\tmp\\pyuaadapter\\cs_client\\UAClient.Tests\\FullIntegrationTests.cs",
+              "RelativeDocumentMoniker": "UAClient.Tests\\FullIntegrationTests.cs",
+              "ToolTip": "C:\\Users\\BenjaminBlumhofer\\source\\tmp\\pyuaadapter\\cs_client\\UAClient.Tests\\FullIntegrationTests.cs",
+              "RelativeToolTip": "UAClient.Tests\\FullIntegrationTests.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAqwAsAAAAcAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2025-12-01T21:48:21.137Z",
+              "EditorCaption": ""
+            }
+          ]
+        },
+        {
+          "DockedHeight": 93,
+          "SelectedChildIndex": -1,
+          "Children": [
+            {
+              "$type": "Bookmark",
+              "Name": "ST:1:0:{d212f56b-c48a-434c-a121-1c5d80b59b9f}"
+            },
+            {
+              "$type": "Bookmark",
+              "Name": "ST:0:0:{d78612c7-9962-4b83-95d9-268046dad23a}"
+            },
+            {
+              "$type": "Bookmark",
+              "Name": "ST:0:0:{34e76e81-ee4a-11d0-ae2e-00a0c90fffc3}"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

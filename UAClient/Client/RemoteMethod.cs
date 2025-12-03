@@ -1,0 +1,76 @@
+using System;
+using System.Collections.Generic;
+using System.Threading.Tasks;
+using Opc.Ua;
+using Opc.Ua.Client;
+
+namespace UAClient.Client
+{
+    public class RemoteMethod : BaseRemoteCallable
+    {
+        public RemoteMethod(string name, NodeId baseNodeId, UaClient client) : base(name, baseNodeId, client)
+        {
+        }
+
+        public async Task<IDictionary<string, object?>> CallAsync(params object[] inputs)
+        {
+            var session = RemoteServerClient.Session ?? throw new InvalidOperationException("No session");
+
+            // Browse for method children and prefer a method named 'Call'
+            var browser = new Browser(session)
+            {
+                BrowseDirection = BrowseDirection.Forward,
+                ReferenceTypeId = ReferenceTypeIds.HasComponent,
+                NodeClassMask = (int)NodeClass.Method
+            };
+
+            ReferenceDescriptionCollection refs = null;
+            try { refs = await browser.BrowseAsync(BaseNodeId); } catch { }
+
+            if (refs == null || refs.Count == 0)
+                throw new InvalidOperationException("No method found to call");
+
+            NodeId? methodId = null;
+            // try to find a method named 'Call'
+            foreach (var r in refs)
+            {
+                try
+                {
+                    if (r?.NodeClass != NodeClass.Method) continue;
+                    var name = r.DisplayName?.Text ?? r.BrowseName?.Name ?? string.Empty;
+                    var expanded = r.NodeId as ExpandedNodeId ?? new ExpandedNodeId(r.NodeId);
+                    var candidate = UaHelpers.ToNodeId(expanded, session);
+                    if (string.Equals(name, "Call", StringComparison.OrdinalIgnoreCase)) { methodId = candidate; break; }
+                    if (methodId == null) methodId = candidate; // fallback to first method
+                }
+                catch { }
+            }
+
+            if (methodId == null) throw new InvalidOperationException("Failed to resolve method node id");
+
+            // Call method
+            try
+            {
+                await session.CallAsync(BaseNodeId, methodId, System.Threading.CancellationToken.None, inputs);
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException($"Method call failed: {ex.Message}", ex);
+            }
+
+            var outDict = new Dictionary<string, object?>();
+            // read FinalResultData variables (best-effort)
+            foreach (var kv in FinalResultData)
+            {
+                try
+                {
+                    var dv = await session.ReadValueAsync(kv.Value.NodeId, System.Threading.CancellationToken.None);
+                    outDict[kv.Key] = dv?.Value;
+                }
+                catch { outDict[kv.Key] = null; }
+            }
+
+            return outDict;
+        }
+    }
+}

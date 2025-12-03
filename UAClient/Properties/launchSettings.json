@@ -1,0 +1,7 @@
+{
+  "profiles": {
+    "UAClient": {
+      "commandName": "Project"
+    }
+  }
+}

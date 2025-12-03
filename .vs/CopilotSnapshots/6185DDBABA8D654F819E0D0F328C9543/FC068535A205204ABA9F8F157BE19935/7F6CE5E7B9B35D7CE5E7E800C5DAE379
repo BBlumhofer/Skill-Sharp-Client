@@ -1,0 +1,181 @@
+﻿using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+using Opc.Ua;
+using Opc.Ua.Client;
+
+namespace UAClient.Client
+{
+    public interface IDataChangeHandler
+    {
+        void DataChangeNotification(NodeId nodeId, DataValue value, MonitoredItemNotificationEventArgs args);
+    }
+
+    public class SubscriptionManager : IDisposable, IAsyncDisposable
+    {
+        private readonly UaClient _client;
+        private readonly List<Subscription> _subscriptions = new();
+        private readonly ConcurrentDictionary<int, MonitoredItem> _monitored = new();
+        private readonly ConcurrentDictionary<int, (IDataChangeHandler handler, NodeId nodeId)> _handlers = new();
+        private Subscription? _defaultSubscription;
+
+        public SubscriptionManager(UaClient client)
+        {
+            _client = client;
+            // eagerly create default subscription on construction (async init pattern not ideal, but ensures sub exists)
+            try
+            {
+                var session = _client.Session;
+                if (session != null)
+                {
+                    _defaultSubscription = new Subscription() { PublishingInterval = 1000 };
+                    session.AddSubscription(_defaultSubscription);
+                    // Note: CreateAsync must be awaited, but constructor can't be async.
+                    // We'll ensure it's created lazily on first use in a helper method.
+                }
+            }
+            catch { }
+        }
+
+        public void Dispose()
+        {
+            DisposeAsync().AsTask().GetAwaiter().GetResult();
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            foreach (var s in _subscriptions.ToArray())
+            {
+                try { await s.DeleteAsync(true); } catch { }
+            }
+            _subscriptions.Clear();
+        }
+
+        public async Task<Subscription> CreateSubscriptionAsync(double publishingInterval = 1000)
+        {
+            var session = _client.Session ?? throw new InvalidOperationException("No session");
+            // ensure default subscription exists
+            await EnsureDefaultSubscriptionAsync();
+            var sub = new Subscription() { PublishingInterval = (int)publishingInterval };
+            session.AddSubscription(sub);
+            await sub.CreateAsync();
+            _subscriptions.Add(sub);
+            return sub;
+        }
+
+        private async Task<Subscription> EnsureDefaultSubscriptionAsync()
+        {
+            if (_defaultSubscription != null && _defaultSubscription.Created) return _defaultSubscription;
+            var session = _client.Session ?? throw new InvalidOperationException("No session");
+            if (_defaultSubscription == null)
+            {
+                _defaultSubscription = new Subscription() { PublishingInterval = 1000 };
+                session.AddSubscription(_defaultSubscription);
+            }
+            if (!_defaultSubscription.Created)
+            {
+                await _defaultSubscription.CreateAsync();
+                _subscriptions.Add(_defaultSubscription);
+            }
+            return _defaultSubscription;
+        }
+
+        public async Task<MonitoredItem> AddMonitoredItemAsync(NodeId nodeId, Action<MonitoredItem, MonitoredItemNotificationEventArgs> handler, Subscription? subscription = null, uint samplingInterval = 0)
+        {
+            var session = _client.Session ?? throw new InvalidOperationException("No session");
+            var sub = subscription ?? await EnsureDefaultSubscriptionAsync();
+
+            var mi = new MonitoredItem(sub.DefaultItem)
+            {
+                StartNodeId = nodeId,
+                AttributeId = Attributes.Value,
+                SamplingInterval = (int)samplingInterval,
+                QueueSize = 10,
+                DiscardOldest = true
+            };
+
+            mi.Notification += (m, e) => handler(m, e);
+            sub.AddItem(mi);
+            await sub.ApplyChangesAsync();
+
+            _monitored[(int)mi.ClientHandle] = mi;
+            return mi;
+        }
+
+        public async Task<MonitoredItem> AddEventMonitoredItemAsync(NodeId nodeId, Action<MonitoredItem, MonitoredItemNotificationEventArgs> handler, Subscription? subscription = null)
+        {
+            var session = _client.Session ?? throw new InvalidOperationException("No session");
+            var sub = subscription ?? await EnsureDefaultSubscriptionAsync();
+
+            var mi = new MonitoredItem(sub.DefaultItem)
+            {
+                StartNodeId = nodeId,
+                AttributeId = Attributes.EventNotifier,
+                MonitoringMode = MonitoringMode.Reporting,
+                QueueSize = 0,
+                DiscardOldest = true
+            };
+
+            mi.Notification += (m, e) => handler(m, e);
+            sub.AddItem(mi);
+            await sub.ApplyChangesAsync();
+
+            _monitored[(int)mi.ClientHandle] = mi;
+            return mi;
+        }
+
+        public async Task SubscribeDataChangeAsync(IDataChangeHandler handler, IEnumerable<NodeId> nodes)
+        {
+            var session = _client.Session ?? throw new InvalidOperationException("No session");
+            var sub = await EnsureDefaultSubscriptionAsync();
+            var items = new List<MonitoredItem>();
+            foreach (var nodeId in nodes)
+            {
+                var mi = new MonitoredItem(sub.DefaultItem)
+                {
+                    StartNodeId = nodeId,
+                    AttributeId = Attributes.Value,
+                    SamplingInterval = 0,
+                    QueueSize = 1,
+                    DiscardOldest = true
+                };
+                mi.Notification += async (m, e) =>
+                {
+                    if (_handlers.TryGetValue((int)mi.ClientHandle, out var pair))
+                    {
+                        try
+                        {
+                            var dv = await session.ReadValueAsync(nodeId);
+                            pair.handler.DataChangeNotification(nodeId, dv, e);
+                        }
+                        catch { }
+                    }
+                };
+
+                sub.AddItem(mi);
+                items.Add(mi);
+                _monitored[(int)mi.ClientHandle] = mi;
+                _handlers[(int)mi.ClientHandle] = (handler, nodeId);
+            }
+            // apply changes once for all items (batch mode)
+            if (items.Count > 0)
+            {
+                await sub.ApplyChangesAsync();
+            }
+        }
+
+        public async Task RemoveMonitoredItemAsync(MonitoredItem item)
+        {
+            try
+            {
+                var sub = item.Subscription;
+                sub?.RemoveItem(item);
+                if (sub != null) await sub.ApplyChangesAsync();
+                _monitored.TryRemove((int)item.ClientHandle, out _);
+            }
+            catch { }
+        }
+    }
+}

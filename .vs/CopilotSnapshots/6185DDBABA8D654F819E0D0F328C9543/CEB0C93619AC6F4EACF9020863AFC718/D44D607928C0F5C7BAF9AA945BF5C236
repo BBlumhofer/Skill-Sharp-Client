@@ -1,0 +1,187 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using Opc.Ua;
+using Opc.Ua.Client;
+
+namespace UAClient.Client
+{
+    public abstract class BaseRemoteCallable : IDataChangeHandler
+    {
+        public string Name { get; }
+        public NodeId BaseNodeId { get; }
+        protected UaClient RemoteServerClient { get; }
+
+        // Exposed maps of variables keyed by name for easy direct access in user code
+        public IDictionary<string, RemoteVariable> FinalResultData { get; } = new Dictionary<string, RemoteVariable>(StringComparer.OrdinalIgnoreCase);
+        public IDictionary<string, RemoteVariable> Monitoring { get; } = new Dictionary<string, RemoteVariable>(StringComparer.OrdinalIgnoreCase);
+        public IDictionary<string, RemoteVariable> ParameterSet { get; } = new Dictionary<string, RemoteVariable>(StringComparer.OrdinalIgnoreCase);
+
+        // Internal nodeId -> RemoteVariable maps used for subscription lookups
+        protected IDictionary<NodeId, RemoteVariable> _final_result_nodes = new Dictionary<NodeId, RemoteVariable>();
+        protected IDictionary<NodeId, RemoteVariable> _monitoring_nodes = new Dictionary<NodeId, RemoteVariable>();
+        protected IDictionary<NodeId, RemoteVariable> _parameter_nodes = new Dictionary<NodeId, RemoteVariable>();
+
+        protected List<Action<RemoteVariable>> _subscribers = new List<Action<RemoteVariable>>();
+
+        // If SetupSubscriptionsAsync creates its own SubscriptionManager, keep a reference so overrides can reuse it.
+        protected SubscriptionManager? _internalSubscriptionManager;
+
+        protected BaseRemoteCallable(string name, NodeId baseNodeId, UaClient client)
+        {
+            Name = name;
+            BaseNodeId = baseNodeId;
+            RemoteServerClient = client;
+        }
+
+        // Populate variable maps and create subscriptions only when requested by caller.
+        public virtual async Task SetupSubscriptionsAsync(SubscriptionManager? subscriptionManager, bool createSubscriptions = true)
+        {
+            // Ensure we have a SubscriptionManager — create one if caller didn't provide it
+            if (subscriptionManager == null)
+            {
+                try
+                {
+                    subscriptionManager = new SubscriptionManager(RemoteServerClient);
+                    _internalSubscriptionManager = subscriptionManager;
+                }
+                catch { /* ignore creation failure and proceed without subscriptions */ }
+            }
+
+            var session = RemoteServerClient.Session ?? throw new InvalidOperationException("No session");
+            var browser = new Browser(session)
+            {
+                BrowseDirection = BrowseDirection.Forward,
+                ReferenceTypeId = ReferenceTypeIds.HierarchicalReferences,
+                NodeClassMask = (int)(NodeClass.Object | NodeClass.Variable | NodeClass.Method)
+            };
+
+            ReferenceDescriptionCollection refs = null;
+            try { refs = await browser.BrowseAsync(BaseNodeId); } catch { }
+            if (refs == null) return;
+
+            foreach (var r in refs)
+            {
+                try
+                {
+                    var childName = r.DisplayName?.Text ?? r.BrowseName?.Name ?? "";
+                    var expanded = r.NodeId as ExpandedNodeId ?? new ExpandedNodeId(r.NodeId);
+                    var childId = UaHelpers.ToNodeId(expanded, session);
+                    if (childId == null) continue;
+
+                    if (string.Equals(childName, "FinalResultData", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var nodeMap = new Dictionary<NodeId, RemoteVariable>();
+                        await RemoteVariableCollector.AddVariableNodesAsync(session, childId, nodeMap, FinalResultData, false);
+                        lock (_final_result_nodes)
+                        {
+                            foreach (var kv in nodeMap) _final_result_nodes[kv.Key] = kv.Value;
+                            foreach (var v in _final_result_nodes.Values) v.SetClient(RemoteServerClient);
+                        }
+                        // initial best-effort read of values
+                        await PopulateInitialValuesAsync(session, _final_result_nodes.Values);
+
+                        // FinalResultData is read on demand; do not create subscriptions here by default
+                    }
+                    else if (string.Equals(childName, "Monitoring", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var nodeMap = new Dictionary<NodeId, RemoteVariable>();
+                        var nameMap = new Dictionary<string, RemoteVariable>(StringComparer.OrdinalIgnoreCase);
+                        await RemoteVariableCollector.AddVariableNodesAsync(session, childId, nodeMap, nameMap, false);
+                        lock (_monitoring_nodes)
+                        {
+                            foreach (var kv in nodeMap) _monitoring_nodes[kv.Key] = kv.Value;
+                        }
+                        lock (Monitoring)
+                        {
+                            foreach (var kv in nameMap) Monitoring[kv.Key] = kv.Value;
+                            // inject client reference
+                            foreach (var v in Monitoring.Values) v.SetClient(RemoteServerClient);
+                        }
+
+                        await PopulateInitialValuesAsync(session, _monitoring_nodes.Values);
+
+                        // Only subscribe to Monitoring variables when explicitly requested
+                        if (_monitoring_nodes.Count > 0 && createSubscriptions && subscriptionManager != null)
+                        {
+                            await subscriptionManager.SubscribeDataChangeAsync(this, _monitoring_nodes.Keys);
+                        }
+                    }
+                    else if (string.Equals(childName, "ParameterSet", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var nodeMap = new Dictionary<NodeId, RemoteVariable>();
+                        await RemoteVariableCollector.AddVariableNodesAsync(session, childId, nodeMap, ParameterSet, true);
+                        lock (_parameter_nodes)
+                        {
+                            foreach (var kv in nodeMap) _parameter_nodes[kv.Key] = kv.Value;
+                            foreach (var v in _parameter_nodes.Values) v.SetClient(RemoteServerClient);
+                        }
+
+                        await PopulateInitialValuesAsync(session, _parameter_nodes.Values);
+                        // Parameters are managed via read/write operations; do not subscribe by default
+                    }
+                }
+                catch { }
+            }
+        }
+
+        // Helper: bounded parallel initial read for a set of RemoteVariable instances
+        private static async Task PopulateInitialValuesAsync(Session session, IEnumerable<RemoteVariable> rvs)
+        {
+            if (session == null) return;
+            var list = rvs.Where(rv => rv != null && rv.NodeId != null).ToList();
+            if (list.Count == 0) return;
+            var sem = new SemaphoreSlim(10);
+            var tasks = list.Select(async rv =>
+            {
+                await sem.WaitAsync();
+                try
+                {
+                    try
+                    {
+                        var dv = await session.ReadValueAsync(rv.NodeId, CancellationToken.None);
+                        if (dv != null) rv.UpdateFromDataValue(dv);
+                    }
+                    catch { }
+                }
+                finally { sem.Release(); }
+            });
+            try { await Task.WhenAll(tasks); } catch { }
+        }
+
+        public void AddSubscriber(Action<RemoteVariable> callback)
+        {
+            _subscribers.Add(callback);
+        }
+
+        public virtual void DataChangeNotification(NodeId nodeId, DataValue value, MonitoredItemNotificationEventArgs args)
+        {
+            try
+            {
+                if (nodeId == null) return;
+                if (_final_result_nodes.TryGetValue(nodeId, out var rv))
+                {
+                    rv.UpdateFromDataValue(value);
+                    foreach (var cb in _subscribers)
+                    {
+                        try { cb(rv); } catch { }
+                    }
+                    return;
+                }
+                if (_monitoring_nodes.TryGetValue(nodeId, out var mv))
+                {
+                    mv.UpdateFromDataValue(value);
+                    return;
+                }
+                if (_parameter_nodes.TryGetValue(nodeId, out var pv))
+                {
+                    pv.UpdateFromDataValue(value);
+                    return;
+                }
+            }
+            catch { }
+        }
+    }
+}

@@ -1,0 +1,49 @@
+{
+  "Version": 1,
+  "WorkspaceRootPath": "C:\\Users\\BenjaminBlumhofer\\source\\tmp\\pyuaadapter\\cs_client\\UAClient.Tests\\",
+  "Documents": [
+    {
+      "AbsoluteMoniker": "D:0:0:{43CE5E25-2E86-D4E0-0310-6C237F42F2A4}|UAClient.Tests.csproj|c:\\users\\benjaminblumhofer\\source\\tmp\\pyuaadapter\\cs_client\\uaclient.tests\\uaclienttests.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{43CE5E25-2E86-D4E0-0310-6C237F42F2A4}|UAClient.Tests.csproj|solutionrelative:uaclienttests.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    }
+  ],
+  "DocumentGroupContainers": [
+    {
+      "Orientation": 1,
+      "VerticalTabListWidth": 256,
+      "DocumentGroups": [
+        {
+          "DockedHeight": 93,
+          "SelectedChildIndex": 0,
+          "Children": [
+            {
+              "$type": "Document",
+              "DocumentIndex": 0,
+              "Title": "UaClientTests.cs",
+              "DocumentMoniker": "C:\\Users\\BenjaminBlumhofer\\source\\tmp\\pyuaadapter\\cs_client\\UAClient.Tests\\UaClientTests.cs",
+              "RelativeDocumentMoniker": "UaClientTests.cs",
+              "ToolTip": "C:\\Users\\BenjaminBlumhofer\\source\\tmp\\pyuaadapter\\cs_client\\UAClient.Tests\\UaClientTests.cs",
+              "RelativeToolTip": "UaClientTests.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2025-12-01T21:29:56.842Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Bookmark",
+              "Name": "ST:1:0:{d212f56b-c48a-434c-a121-1c5d80b59b9f}"
+            },
+            {
+              "$type": "Bookmark",
+              "Name": "ST:0:0:{d78612c7-9962-4b83-95d9-268046dad23a}"
+            },
+            {
+              "$type": "Bookmark",
+              "Name": "ST:0:0:{34e76e81-ee4a-11d0-ae2e-00a0c90fffc3}"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

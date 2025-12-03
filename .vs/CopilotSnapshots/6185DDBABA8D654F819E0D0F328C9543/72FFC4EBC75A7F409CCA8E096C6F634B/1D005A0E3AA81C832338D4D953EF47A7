@@ -1,0 +1,771 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+using Opc.Ua;
+using Opc.Ua.Client;
+
+namespace UAClient.Client
+{
+    public class RemoteSkill : BaseRemoteCallable
+    {
+        private readonly RemoteServer _remoteServer;
+        private List<string>? _availableStates;
+        private NodeId? _stateMachineNode;
+        private NodeId? _currentStateNode;
+        private NodeId? _startMethodNode;
+        private NodeId? _resetMethodNode;
+        private NodeId? _stopMethodNode;
+        private NodeId? _abortMethodNode;
+
+        // cached state + subscribers (mirror Python behaviour)
+        private Common.SkillStates _cachedState = Common.SkillStates.Halted;
+        private List<Action<Common.SkillStates>> _stateSubscribers = new List<Action<Common.SkillStates>>();
+
+        public NodeId? StateMachineNode => _stateMachineNode;
+        public NodeId? CurrentStateNode => _currentStateNode;
+        public NodeId? StartMethodNode => _startMethodNode;
+        public NodeId? ResetMethodNode => _resetMethodNode;
+        public NodeId? StopMethodNode => _stopMethodNode;
+        public NodeId? AbortMethodNode => _abortMethodNode;
+
+        // Expose a RemoteVariable for the current state if available via Monitoring map
+        public RemoteVariable? CurrentStateVariable
+        {
+            get
+            {
+                if (Monitoring.TryGetValue("CurrentState", out var rv)) return rv;
+                return null;
+            }
+        }
+
+        public RemoteSkill(string name, NodeId baseNodeId, UaClient client, RemoteServer remoteServer) : base(name, baseNodeId, client)
+        {
+            _remoteServer = remoteServer;
+        }
+
+        public async Task<NodeId?> FindMethodNodeRecursive(Session session, NodeId startNode, string methodName)
+        {
+            // Try fast path: translate common paths to NodeId via server-side TranslateBrowsePaths
+            try
+            {
+                var try1 = await SessionBrowseCache.TranslatePathAsync(session, startNode, new[] { methodName });
+                if (try1 != null) return try1;
+                var try2 = await SessionBrowseCache.TranslatePathAsync(session, startNode, new[] { "StateMachine", methodName });
+                if (try2 != null) return try2;
+                var try3 = await SessionBrowseCache.TranslatePathAsync(session, startNode, new[] { "SkillExecution", "StateMachine", methodName });
+                if (try3 != null) return try3;
+            }
+            catch { }
+
+            var browser = new Browser(session)
+            {
+                BrowseDirection = BrowseDirection.Forward,
+                // restrict browsing to HasComponent relationships to avoid wide hierarchical walks
+                ReferenceTypeId = ReferenceTypeIds.HasComponent,
+                NodeClassMask = (int)(NodeClass.Object | NodeClass.Variable | NodeClass.Method)
+            };
+            var queue = new Queue<NodeId>();
+            var visited = new HashSet<string>(); // use string form to compare NodeIds safely
+            queue.Enqueue(startNode);
+            visited.Add(startNode.ToString());
+            int inspected = 0;
+            const int MaxInspected = 1000; // defensive cutoff to avoid pathological long searches
+
+            while (queue.Count > 0)
+            {
+                var node = queue.Dequeue();
+                if (++inspected > MaxInspected) break;
+                ReferenceDescriptionCollection refs = null;
+                try
+                {
+                    refs = await browser.BrowseAsync(node);
+                }
+                catch { }
+
+                if (refs == null) continue;
+
+                foreach (var r in refs)
+                {
+                    try
+                    {
+                        if (r?.NodeId == null) continue;
+                        // Check for method-like nodes
+                        if (r.NodeClass == NodeClass.Method)
+                        {
+                            var name = r.DisplayName?.Text ?? r.BrowseName?.Name;
+                            if (!string.IsNullOrEmpty(name) && string.Equals(name, methodName, StringComparison.OrdinalIgnoreCase))
+                            {
+                                var expanded = r.NodeId as ExpandedNodeId ?? new ExpandedNodeId(r.NodeId);
+                                return UaHelpers.ToNodeId(expanded, session);
+                            }
+                        }
+
+                        // enqueue objects/variables to look deeper
+                        if (r.NodeClass == NodeClass.Object || r.NodeClass == NodeClass.Variable)
+                        {
+                            var expanded = r.NodeId as ExpandedNodeId ?? new ExpandedNodeId(r.NodeId);
+                            var childId = UaHelpers.ToNodeId(expanded, session);
+                            if (childId != null)
+                            {
+                                var key = childId.ToString();
+                                if (!visited.Contains(key))
+                                {
+                                    visited.Add(key);
+                                    queue.Enqueue(childId);
+                                }
+                            }
+                        }
+                    }
+                    catch { }
+                }
+            }
+
+            return null;
+        }
+
+        public async Task WriteParameterAsync(string parameterName, object value)
+        {
+            var session = RemoteServerClient.Session ?? throw new InvalidOperationException("No session");
+            // prefer ParameterSet map first if available
+            if (ParameterSet.TryGetValue(parameterName, out var rv) && rv?.NodeId != null)
+            {
+                try
+                {
+                    await RemoteServerClient.WriteNodeAsync(rv.NodeId.ToString(), value);
+                    return;
+                }
+                catch (ServiceResultException sre) when (sre.StatusCode == StatusCodes.BadOutOfRange)
+                {
+                    UAClient.Common.Log.Warn($"RemoteSkill '{Name}': failed to write parameter {parameterName}: BadOutOfRange (via ParameterSet)");
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    UAClient.Common.Log.Warn($"RemoteSkill '{Name}': failed to write parameter {parameterName}: {ex.Message}");
+                    throw;
+                }
+            }
+
+            // fallback: attempt to locate parameter node dynamically
+            NodeId? paramRoot = await FindNodeByBrowseNameRecursive(session, BaseNodeId, "ParameterSet");
+            var varNode = paramRoot != null ? await FindVariableNodeRecursive(session, paramRoot, parameterName)
+                                           : await FindVariableNodeRecursive(session, BaseNodeId, parameterName);
+            if (varNode == null)
+            {
+                UAClient.Common.Log.Warn($"RemoteSkill '{Name}': parameter '{parameterName}' not found under {BaseNodeId}");
+                return;
+            }
+            UAClient.Common.Log.Info($"RemoteSkill '{Name}': writing parameter {parameterName} -> {value}");
+            // Use UaClient helper if available
+            try
+            {
+                await RemoteServerClient.WriteNodeAsync(varNode.ToString(), value);
+            }
+            catch (ServiceResultException sre) when (sre.StatusCode == StatusCodes.BadOutOfRange)
+            {
+                // Attempt to read EURange or other metadata to help diagnosis
+                try
+                {
+                    var eurangeNode = await FindNodeByBrowseNameRecursive(session, varNode, "EURange");
+                    object? eurangeVal = null;
+                    if (eurangeNode != null)
+                    {
+                        var dv = await session.ReadValueAsync(eurangeNode, System.Threading.CancellationToken.None);
+                        eurangeVal = dv.Value;
+                    }
+                    UAClient.Common.Log.Warn($"RemoteSkill '{Name}': failed to write parameter {parameterName}: BadOutOfRange; attempted value={value}; EURange={eurangeVal}");
+                }
+                catch (Exception ex)
+                {
+                    UAClient.Common.Log.Warn($"RemoteSkill '{Name}': failed to write parameter {parameterName}: BadOutOfRange (and reading EURange failed): {ex.Message}");
+                }
+                throw;
+            }
+            catch (Exception ex)
+            {
+                UAClient.Common.Log.Warn($"RemoteSkill '{Name}': failed to write parameter {parameterName}: {ex.Message}");
+            }
+        }
+
+        public async Task<string?> WaitForNextStateAsync(SubscriptionManager subMgr, TimeSpan timeout)
+        {
+            var session = RemoteServerClient.Session ?? throw new InvalidOperationException("No session");
+            var stateNode = _currentStateNode ?? await FindVariableNodeRecursive(session, BaseNodeId, "CurrentState");
+            if (stateNode == null)
+            {
+                UAClient.Common.Log.Warn($"RemoteSkill '{Name}': CurrentState node not found under {BaseNodeId}");
+                return null;
+            }
+
+            // read initial state
+            string initial = "";
+            try { var dv = await session.ReadValueAsync(stateNode, System.Threading.CancellationToken.None); initial = dv.Value?.ToString() ?? ""; } catch { }
+
+            var tcs = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
+            MonitoredItem? mi = null;
+            try
+            {
+                mi = await subMgr.AddMonitoredItemAsync(stateNode, async (m, e) =>
+                {
+                    try
+                    {
+                        var dv = await session.ReadValueAsync(stateNode, System.Threading.CancellationToken.None);
+                        var val = dv.Value?.ToString();
+                        if (val != initial) tcs.TrySetResult(val);
+                    }
+                    catch { }
+                });
+
+                var completed = await Task.WhenAny(tcs.Task, Task.Delay(timeout));
+                if (completed == tcs.Task) return await tcs.Task;
+                return null;
+            }
+            finally { if (mi != null) await subMgr.RemoveMonitoredItemAsync(mi); }
+        }
+
+        private async Task<NodeId?> FindVariableNodeRecursive(Session session, NodeId startNode, string variableName)
+        {
+            // Try translate-based fast paths
+            try
+            {
+                var t1 = await SessionBrowseCache.TranslatePathAsync(session, startNode, new[] { variableName }); if (t1 != null) return t1;
+                var t2 = await SessionBrowseCache.TranslatePathAsync(session, startNode, new[] { "ParameterSet", variableName }); if (t2 != null) return t2;
+                var t3 = await SessionBrowseCache.TranslatePathAsync(session, startNode, new[] { "Monitoring", variableName }); if (t3 != null) return t3;
+                var t4 = await SessionBrowseCache.TranslatePathAsync(session, startNode, new[] { "SkillExecution", "StateMachine", variableName }); if (t4 != null) return t4;
+            }
+            catch { }
+
+            var browser = new Browser(session)
+            {
+                BrowseDirection = BrowseDirection.Forward,
+                ReferenceTypeId = ReferenceTypeIds.HierarchicalReferences,
+                // include Objects as well so we can traverse through Object nodes to find nested Variables
+                NodeClassMask = (int)(NodeClass.Object | NodeClass.Variable)
+            };
+            var queue = new Queue<NodeId>(); queue.Enqueue(startNode);
+            while (queue.Count > 0)
+            {
+                var node = queue.Dequeue();
+                ReferenceDescriptionCollection refs = null;
+                try { refs = await browser.BrowseAsync(node); } catch { }
+                if (refs == null) continue;
+                foreach (var r in refs)
+                {
+                    try
+                    {
+                        if (r?.NodeId == null) continue;
+                        if (r.NodeClass == NodeClass.Variable)
+                        {
+                            var name = r.DisplayName?.Text ?? r.BrowseName?.Name;
+                            if (!string.IsNullOrEmpty(name) && string.Equals(name, variableName, StringComparison.OrdinalIgnoreCase))
+                            {
+                                var expanded = r.NodeId as ExpandedNodeId ?? new ExpandedNodeId(r.NodeId);
+                                return UaHelpers.ToNodeId(expanded, session);
+                            }
+                        }
+                        if (r.NodeClass == NodeClass.Object || r.NodeClass == NodeClass.Variable)
+                        {
+                            var expanded = r.NodeId as ExpandedNodeId ?? new ExpandedNodeId(r.NodeId);
+                            var childId = UaHelpers.ToNodeId(expanded, session);
+                            if (childId != null) queue.Enqueue(childId);
+                        }
+                    }
+                    catch { }
+                }
+            }
+            return null;
+        }
+
+        public async Task<int?> GetStateAsync()
+        {
+            var session = RemoteServerClient.Session ?? throw new InvalidOperationException("No session");
+            // try Monitoring CurrentState variable first
+            try
+            {
+                var csv = CurrentStateVariable;
+                if (csv != null && csv.Value != null)
+                {
+                    var v = csv.Value;
+                    if (v is int vi) return vi;
+                    if (v is uint vui) return (int)vui;
+                    if (v is short s) return (int)s;
+                    if (v is ushort us) return (int)us;
+                    var name = v is LocalizedText lt ? lt.Text : v.ToString();
+                    if (!string.IsNullOrEmpty(name))
+                    {
+                        try { var enumVal = (Common.SkillStates)Enum.Parse(typeof(Common.SkillStates), name, true); return (int)enumVal; } catch { }
+                    }
+                }
+            }
+            catch { }
+
+            NodeId? vid = _currentStateNode;
+            if (vid == null)
+            {
+                vid = await FindVariableNodeRecursive(session, BaseNodeId, "CurrentState") ?? await FindVariableNodeRecursive(session, BaseNodeId, "State");
+            }
+            if (vid == null) return null;
+            try
+            {
+                var dv = await session.ReadValueAsync(vid, System.Threading.CancellationToken.None);
+                var val = dv?.Value;
+                if (val == null)
+                {
+                    // try fallback locations
+                    try
+                    {
+                        NodeId? fallback = null;
+                        if (_currentStateNode != null)
+                        {
+                            fallback = await FindVariableNodeRecursive(session, _currentStateNode, "StateNumber") ?? await FindVariableNodeRecursive(session, _currentStateNode, "State");
+                        }
+                        if (fallback == null && _stateMachineNode != null)
+                        {
+                            fallback = await FindVariableNodeRecursive(session, _stateMachineNode, "StateNumber") ?? await FindVariableNodeRecursive(session, _stateMachineNode, "State");
+                        }
+                        if (fallback != null)
+                        {
+                            var dv2 = await session.ReadValueAsync(fallback, System.Threading.CancellationToken.None);
+                            var v2 = dv2?.Value;
+                            if (v2 is uint u2) return (int)u2;
+                            if (v2 is int ii) return ii;
+                            if (v2 is ushort us2) return (int)us2;
+                            if (v2 is short s2) return (int)s2;
+                            var name2 = v2 is LocalizedText lt2 ? lt2.Text : v2?.ToString();
+                            if (!string.IsNullOrEmpty(name2))
+                            {
+                                try { var enumVal2 = (Common.SkillStates)Enum.Parse(typeof(Common.SkillStates), name2, true); return (int)enumVal2; } catch { }
+                            }
+                        }
+                        try
+                        {
+                            var node = await session.ReadNodeAsync(vid);
+                            var disp = node?.DisplayName?.Text ?? node?.BrowseName?.Name;
+                            if (!string.IsNullOrEmpty(disp))
+                            {
+                                try { var enumVal3 = (Common.SkillStates)Enum.Parse(typeof(Common.SkillStates), disp, true); return (int)enumVal3; } catch { }
+                            }
+                        }
+                        catch { }
+                    }
+                    catch { }
+
+                    return null;
+                }
+                if (val is int i) return i;
+                if (val is uint ui) return (int)ui;
+                if (val is short s) return (int)s;
+                if (val is ushort us) return (int)us;
+                var name = val is LocalizedText ltx ? ltx.Text : val.ToString();
+                if (!string.IsNullOrEmpty(name))
+                {
+                    try { var enumVal = (Common.SkillStates)Enum.Parse(typeof(Common.SkillStates), name, true); return (int)enumVal; } catch { }
+                }
+            }
+            catch { }
+            return null;
+        }
+
+        /// <summary>
+        /// Determine if skill is finite based on available states (contains 'Completed').
+        /// Fallback to FinalResultData heuristic when available states are unknown.
+        /// </summary>
+        public bool IsFinite
+        {
+            get
+            {
+                if (_availableStates != null && _availableStates.Count > 0)
+                {
+                    try { UAClient.Common.Log.Info($"RemoteSkill '{Name}': AvailableStates count={_availableStates.Count}"); } catch { }
+                    foreach (var s in _availableStates)
+                    {
+                        if (string.Equals(s, "Completed", StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(s, "Completing", StringComparison.OrdinalIgnoreCase))
+                        {
+                            return true;
+                        }
+                    }
+                    return false;
+                }
+                try { UAClient.Common.Log.Info($"RemoteSkill '{Name}': AvailableStates unknown, FinalResultData.Count={FinalResultData?.Count ?? 0}"); } catch { }
+                return FinalResultData != null && FinalResultData.Count > 0;
+            }
+        }
+
+        private async Task<NodeId?> FindNodeByBrowseNameRecursive(Session session, NodeId startNode, string browseName)
+        {
+            // Try translate-based fast paths
+            try
+            {
+                var t1 = await SessionBrowseCache.TranslatePathAsync(session, startNode, new[] { browseName }); if (t1 != null) return t1;
+                var t2 = await SessionBrowseCache.TranslatePathAsync(session, startNode, new[] { "SkillExecution", browseName }); if (t2 != null) return t2;
+                var t3 = await SessionBrowseCache.TranslatePathAsync(session, startNode, new[] { "StateMachine", browseName }); if (t3 != null) return t3;
+            }
+            catch { }
+
+            var browser = new Browser(session)
+            {
+                BrowseDirection = BrowseDirection.Forward,
+                ReferenceTypeId = ReferenceTypeIds.HierarchicalReferences,
+                NodeClassMask = (int)(NodeClass.Object | NodeClass.Variable | NodeClass.Method)
+            };
+            var queue = new Queue<NodeId>(); queue.Enqueue(startNode);
+            while (queue.Count > 0)
+            {
+                var node = queue.Dequeue();
+                ReferenceDescriptionCollection refs = null;
+                try { refs = await browser.BrowseAsync(node); } catch { }
+                if (refs == null) continue;
+                foreach (var r in refs)
+                {
+                    try
+                    {
+                        if (r?.NodeId == null) continue;
+                        var name = r.DisplayName?.Text ?? r.BrowseName?.Name;
+                        var expanded = r.NodeId as ExpandedNodeId ?? new ExpandedNodeId(r.NodeId);
+                        var childId = UaHelpers.ToNodeId(expanded, session);
+                        if (childId == null) continue;
+                        if (!string.IsNullOrEmpty(name) && string.Equals(name, browseName, StringComparison.OrdinalIgnoreCase)) return childId;
+                        if (r.NodeClass == NodeClass.Object || r.NodeClass == NodeClass.Variable) queue.Enqueue(childId);
+                    }
+                    catch { }
+                }
+            }
+            return null;
+        }
+
+        public override async Task SetupSubscriptionsAsync(SubscriptionManager subscriptionManager, bool createSubscriptions = false)
+        {
+            // allow base to collect FinalResultData (and optionally create subscriptions)
+            await base.SetupSubscriptionsAsync(subscriptionManager, createSubscriptions);
+            var session = RemoteServerClient.Session ?? throw new InvalidOperationException("No session");
+
+            // Try to locate SkillExecution -> StateMachine -> CurrentState / AvailableStates
+            try
+            {
+                var skillExec = await FindNodeByBrowseNameRecursive(session, BaseNodeId, "SkillExecution");
+                if (skillExec != null)
+                {
+                    var stateMachine = await FindNodeByBrowseNameRecursive(session, skillExec, "StateMachine");
+                    if (stateMachine != null)
+                    {
+                        _stateMachineNode = stateMachine;
+                        // CurrentState node
+                        var current = await FindNodeByBrowseNameRecursive(session, stateMachine, "CurrentState");
+                        if (current != null) _currentStateNode = current;
+
+                        // AvailableStates node/value
+                        var avail = await FindNodeByBrowseNameRecursive(session, stateMachine, "AvailableStates");
+                        if (avail != null)
+                        {
+                            try
+                            {
+                                var dv = await session.ReadValueAsync(avail, System.Threading.CancellationToken.None);
+                                var val = dv.Value;
+                                var list = new List<string>();
+                                if (val is string[] sa) list.AddRange(sa);
+                                else if (val is object[] oa)
+                                {
+                                    foreach (var o in oa) list.Add(o?.ToString() ?? "");
+                                }
+                                else if (val != null)
+                                {
+                                    list.Add(val.ToString() ?? "");
+                                }
+                                if (list.Count > 0) _availableStates = list;
+                                // Diagnostic logging: show exactly what AvailableStates contains
+                                try
+                                {
+                                    UAClient.Common.Log.Info($"RemoteSkill '{Name}': AvailableStates read ({list.Count}): {string.Join(", ", list)}");
+                                }
+                                catch { }
+                            }
+                            catch { }
+                        }
+
+                        // subscribe to current state changes if available
+                        if (_currentStateNode != null && createSubscriptions)
+                        {
+                            try
+                            {
+                                await subscriptionManager.SubscribeDataChangeAsync(this, new[] { _currentStateNode });
+                                // Log current state node and its current value for diagnostics
+                                try
+                                {
+                                    var cv = await session.ReadValueAsync(_currentStateNode, System.Threading.CancellationToken.None);
+                                    UAClient.Common.Log.Info($"RemoteSkill '{Name}': CurrentState node={_currentStateNode} initialValue=({cv.Value?.GetType().Name ?? "null"}) {cv.Value}");
+                                    // initialize cached state
+                                    try
+                                    {
+                                        if (cv?.Value != null)
+                                        {
+                                            var v = cv.Value;
+                                            if (v is int vi && Enum.IsDefined(typeof(Common.SkillStates), vi)) _cachedState = (Common.SkillStates)vi;
+                                            else if (v is uint vui)
+                                            {
+                                                var ii = (int)vui; if (Enum.IsDefined(typeof(Common.SkillStates), ii)) _cachedState = (Common.SkillStates)ii;
+                                            }
+                                            else
+                                            {
+                                                var s = v is LocalizedText ltx ? ltx.Text : v.ToString();
+                                                if (!string.IsNullOrEmpty(s))
+                                                {
+                                                    try { _cachedState = (Common.SkillStates)Enum.Parse(typeof(Common.SkillStates), s, true); } catch { }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    catch { }
+                                }
+                                catch { }
+                            }
+                            catch
+                            {
+                                // ignore
+                            }
+                        }
+
+                        // preload commonly used method nodes (Start/Reset/Stop/Abort) using TranslateBrowsePaths first
+                        // parallel preload commonly used method nodes (Start/Reset/Stop/Abort) using TranslateBrowsePaths first
+                        try
+                        {
+                            var startTask = Task.Run(async () =>
+                            {
+                                return await SessionBrowseCache.TranslatePathAsync(session, stateMachine, new[] { "Start" })
+                                       ?? await SessionBrowseCache.TranslatePathAsync(session, BaseNodeId, new[] { "Start" })
+                                       ?? await SessionBrowseCache.TranslatePathAsync(session, BaseNodeId, new[] { "SkillExecution", "StateMachine", "Start" })
+                                       ?? await FindMethodNodeRecursive(session, stateMachine, "Start");
+                            });
+
+                            var resetTask = Task.Run(async () =>
+                            {
+                                return await SessionBrowseCache.TranslatePathAsync(session, stateMachine, new[] { "Reset" })
+                                       ?? await SessionBrowseCache.TranslatePathAsync(session, BaseNodeId, new[] { "Reset" })
+                                       ?? await SessionBrowseCache.TranslatePathAsync(session, BaseNodeId, new[] { "SkillExecution", "StateMachine", "Reset" })
+                                       ?? await FindMethodNodeRecursive(session, stateMachine, "Reset");
+                            });
+
+                            var stopTask = Task.Run(async () =>
+                            {
+                                return await SessionBrowseCache.TranslatePathAsync(session, stateMachine, new[] { "Stop" })
+                                       ?? await SessionBrowseCache.TranslatePathAsync(session, BaseNodeId, new[] { "Stop" })
+                                       ?? await FindMethodNodeRecursive(session, stateMachine, "Stop");
+                            });
+
+                            var abortTask = Task.Run(async () =>
+                            {
+                                return await SessionBrowseCache.TranslatePathAsync(session, stateMachine, new[] { "Abort" })
+                                       ?? await SessionBrowseCache.TranslatePathAsync(session, BaseNodeId, new[] { "Abort" })
+                                       ?? await FindMethodNodeRecursive(session, stateMachine, "Abort");
+                            });
+
+                            await Task.WhenAll(startTask, resetTask, stopTask, abortTask);
+                            _startMethodNode = startTask.Result;
+                            _resetMethodNode = resetTask.Result;
+                            _stopMethodNode = stopTask.Result;
+                            _abortMethodNode = abortTask.Result;
+                        }
+                        catch { }
+                    }
+                }
+            }
+            catch { }
+        }
+
+        public void AddStateSubscriber(Action<Common.SkillStates> callback)
+        {
+            if (callback == null) return;
+            _stateSubscribers.Add(callback);
+        }
+
+        private void NotifyStateSubscribers(Common.SkillStates state)
+        {
+            foreach (var cb in _stateSubscribers)
+            {
+                try { cb(state); } catch { }
+            }
+        }
+
+        public override void DataChangeNotification(NodeId nodeId, DataValue value, MonitoredItemNotificationEventArgs args)
+        {
+            try
+            {
+                if (_currentStateNode != null && nodeId != null && nodeId == _currentStateNode)
+                {
+                    // let base update monitoring variable mapping
+                    base.DataChangeNotification(nodeId, value, args);
+
+                    try
+                    {
+                        object? v = value?.Value;
+                        Common.SkillStates? parsed = null;
+                        if (v == null) { }
+                        else if (v is int ii) { if (Enum.IsDefined(typeof(Common.SkillStates), ii)) parsed = (Common.SkillStates)ii; }
+                        else if (v is uint uii) { var iival = (int)uii; if (Enum.IsDefined(typeof(Common.SkillStates), iival)) parsed = (Common.SkillStates)iival; }
+                        else { var s = v is LocalizedText lt ? lt.Text : v.ToString(); if (!string.IsNullOrEmpty(s)) { try { parsed = (Common.SkillStates)Enum.Parse(typeof(Common.SkillStates), s, true); } catch { } } }
+
+                        if (parsed != null && parsed.Value != _cachedState)
+                        {
+                            _cachedState = parsed.Value;
+                            NotifyStateSubscribers(_cachedState);
+                        }
+                    }
+                    catch { }
+                    return;
+                }
+            }
+            catch { }
+
+            base.DataChangeNotification(nodeId, value, args);
+        }
+
+        public async Task<bool> WaitForStateAsync(Common.SkillStates desired, TimeSpan timeout)
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            while (sw.Elapsed < timeout)
+            {
+                try
+                {
+                    var st = await GetStateAsync();
+                    if (st != null && st == (int)desired) return true;
+                }
+                catch { }
+                await Task.Delay(500);
+            }
+            return false;
+        }
+
+        public async Task StartAsync(params object[] inputs)
+        {
+            var session = RemoteServerClient.Session ?? throw new InvalidOperationException("No session");
+            // Prefer cached Start method node id to avoid repeated searches
+            NodeId? methodId = _startMethodNode;
+            if (methodId == null)
+            {
+                methodId = await FindMethodNodeRecursive(session, BaseNodeId, "Start");
+            }
+            if (methodId == null) throw new InvalidOperationException("Start method not found for skill");
+            await session.CallAsync(BaseNodeId, methodId, System.Threading.CancellationToken.None, inputs);
+        }
+
+        public async Task StopAsync()
+        {
+            var session = RemoteServerClient.Session ?? throw new InvalidOperationException("No session");
+            var methodId = _stopMethodNode ?? await FindMethodNodeRecursive(session, BaseNodeId, "Stop");
+            if (methodId == null) return;
+            await session.CallAsync(BaseNodeId, methodId, System.Threading.CancellationToken.None);
+        }
+
+        public async Task AbortAsync()
+        {
+            var session = RemoteServerClient.Session ?? throw new InvalidOperationException("No session");
+            var methodId = _abortMethodNode ?? await FindMethodNodeRecursive(session, BaseNodeId, "Abort");
+            if (methodId == null) return;
+            await session.CallAsync(BaseNodeId, methodId, System.Threading.CancellationToken.None);
+        }
+
+        public async Task<IDictionary<string, object?>> ExecuteAsync(IDictionary<string, object?>? parameters = null,
+            bool waitForCompletion = true,
+            bool resetAfterCompletion = true,
+            bool resetBeforeIfHalted = true,
+            TimeSpan? timeout = null,
+            SubscriptionManager? subscriptionManager = null)
+        {
+            var session = RemoteServerClient.Session ?? throw new InvalidOperationException("No session");
+            timeout ??= TimeSpan.FromSeconds(30);
+
+            // Write parameters
+            if (parameters != null)
+            {
+                foreach (var kv in parameters)
+                {
+                    try { await WriteParameterAsync(kv.Key, kv.Value ?? ""); } catch { }
+                }
+            }
+
+            // Reset before start if requested
+            try
+            {
+                var st = await GetStateAsync();
+                if (resetBeforeIfHalted && (st == (int)Common.SkillStates.Halted || st == (int)Common.SkillStates.Completed || st == (int)Common.SkillStates.Suspended))
+                {
+                    var resetTarget = _stateMachineNode ?? BaseNodeId;
+                    var resetMethod = _resetMethodNode ?? await FindMethodNodeRecursive(session, resetTarget, "Reset");
+                    if (resetMethod != null)
+                    {
+                        await session.CallAsync(resetTarget, resetMethod, System.Threading.CancellationToken.None);
+                        // wait for Ready
+                        await WaitForStateAsync(Common.SkillStates.Ready, timeout.Value);
+                    }
+                }
+            }
+            catch { }
+
+            // ensure Ready
+            var cur = await GetStateAsync();
+            if (cur == null || cur != (int)Common.SkillStates.Ready)
+            {
+                throw new InvalidOperationException($"RemoteSkill '{Name}' is not in Ready state (current={cur})");
+            }
+
+            // Start
+            await StartAsync();
+
+            // Wait for Running
+            await WaitForStateAsync(Common.SkillStates.Running, TimeSpan.FromSeconds(10));
+
+            if (!waitForCompletion)
+            {
+                // if not waiting, still return final result data after a short delay
+                await Task.Delay(500);
+            }
+
+            // Wait for completion depending on finite/continuous
+            if (waitForCompletion)
+            {
+                if (IsFinite)
+                {
+                    await WaitForStateAsync(Common.SkillStates.Completed, timeout.Value);
+                }
+                else
+                {
+                    // continuous: wait for Halted
+                    await WaitForStateAsync(Common.SkillStates.Halted, timeout.Value);
+                }
+            }
+
+            // Read final result data
+            var outDict = new Dictionary<string, object?>();
+            foreach (var kv in FinalResultData)
+            {
+                try
+                {
+                    var node = kv.Value?.NodeId;
+                    if (node == null) { outDict[kv.Key] = null; continue; }
+                    var dv = await session.ReadValueAsync(node, System.Threading.CancellationToken.None);
+                    outDict[kv.Key] = dv?.Value;
+                }
+                catch { outDict[kv.Key] = null; }
+            }
+
+            // Reset after completion if requested
+            if (resetAfterCompletion)
+            {
+                try
+                {
+                    var resetTarget = _stateMachineNode ?? BaseNodeId;
+                    var resetMethod = _resetMethodNode ?? await FindMethodNodeRecursive(session, resetTarget, "Reset");
+                    if (resetMethod != null)
+                    {
+                        await session.CallAsync(resetTarget, resetMethod, System.Threading.CancellationToken.None);
+                        await WaitForStateAsync(Common.SkillStates.Ready, timeout.Value);
+                    }
+                }
+                catch { }
+            }
+
+            return outDict;
+        }
+    }
+}

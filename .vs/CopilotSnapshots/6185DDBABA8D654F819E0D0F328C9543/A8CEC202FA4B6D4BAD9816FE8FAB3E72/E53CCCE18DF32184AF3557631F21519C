@@ -1,0 +1,395 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using Opc.Ua;
+using Opc.Ua.Client;
+using System.Threading.Tasks;
+using System.Diagnostics;
+using UAClient.Common;
+
+namespace UAClient.Client
+{
+    public interface IRemoteComponentSubscriber
+    {
+        void OnStateChange(string? newState);
+        void OnNewMessage(RemoteComponent component, string text, int severity, string code);
+    }
+
+    public class RemoteComponent : IDataChangeHandler
+    {
+        public string Name { get; protected set; }
+        public NodeId BaseNodeId { get; protected set; }
+
+        protected UaClient RemoteServerClient { get; }
+        protected RemoteServer _remoteServer { get; }
+
+        public IDictionary<string, RemoteSkill> SkillSet { get; } = new Dictionary<string, RemoteSkill>(StringComparer.OrdinalIgnoreCase);
+        public IDictionary<string, RemoteSkill> FeasibilityCheckSet { get; } = new Dictionary<string, RemoteSkill>(StringComparer.OrdinalIgnoreCase);
+        public IDictionary<string, RemoteSkill> PreconditionCheckSet { get; } = new Dictionary<string, RemoteSkill>(StringComparer.OrdinalIgnoreCase);
+        public IDictionary<string, RemoteComponent> Components { get; } = new Dictionary<string, RemoteComponent>(StringComparer.OrdinalIgnoreCase);
+        public IDictionary<string, RemoteMethod> MethodSet { get; } = new Dictionary<string, RemoteMethod>(StringComparer.OrdinalIgnoreCase);
+
+        // simple containers for attributes/monitoring/parameters
+        public IDictionary<string, RemoteVariable> Attributes { get; } = new Dictionary<string, RemoteVariable>(StringComparer.OrdinalIgnoreCase);
+        public IDictionary<string, RemoteVariable> Monitoring { get; } = new Dictionary<string, RemoteVariable>(StringComparer.OrdinalIgnoreCase);
+        public IDictionary<string, RemoteVariable> ParameterSet { get; } = new Dictionary<string, RemoteVariable>(StringComparer.OrdinalIgnoreCase);
+
+        // nodeid -> variable maps for quick lookup during datachange
+        protected IDictionary<NodeId, RemoteVariable> _attribute_nodes = new Dictionary<NodeId, RemoteVariable>();
+        protected IDictionary<NodeId, RemoteVariable> _monitoring_nodes = new Dictionary<NodeId, RemoteVariable>();
+        protected IDictionary<NodeId, RemoteVariable> _parameter_nodes = new Dictionary<NodeId, RemoteVariable>();
+
+        private readonly List<IRemoteComponentSubscriber> _subscribers = new List<IRemoteComponentSubscriber>();
+        
+        // Expose current state as a property (read from Monitoring["CurrentState"] or cached)
+        public string? CurrentState
+        {
+            get
+            {
+                if (Monitoring.TryGetValue("CurrentState", out var stateVar))
+                {
+                    return stateVar.Value?.ToString();
+                }
+                if (Monitoring.TryGetValue("State", out var altStateVar))
+                {
+                    return altStateVar.Value?.ToString();
+                }
+                return null;
+            }
+        }
+
+        public RemoteComponent(string name, NodeId baseNodeId, UaClient client, RemoteServer remoteServer)
+        {
+            Name = name;
+            BaseNodeId = baseNodeId;
+            RemoteServerClient = client;
+            _remoteServer = remoteServer;
+        }
+
+        public IDictionary<string, object?> Dto()
+        {
+            var ret = new Dictionary<string, object?>();
+            ret["name"] = Name;
+            ret["node_id"] = BaseNodeId.ToString();
+            ret["type"] = "Generic";
+            ret["current_state"] = CurrentState;
+            ret["skill_set"] = SkillSet.Keys.ToArray();
+            ret["feasibility_check_set"] = FeasibilityCheckSet.Keys.ToArray();
+            ret["precondition_check_set"] = PreconditionCheckSet.Keys.ToArray();
+            ret["monitoring"] = Monitoring.Keys.ToArray();
+            ret["attributes"] = Attributes.Keys.ToArray();
+            ret["parameter_set"] = ParameterSet.Keys.ToArray();
+            ret["components"] = Components.Keys.ToArray();
+            return ret;
+        }
+
+        public void AddSubscriber(IRemoteComponentSubscriber s)
+        {
+            _subscribers.Add(s);
+        }
+
+        // IDataChangeHandler implementation
+        public void DataChangeNotification(NodeId nodeId, DataValue value, MonitoredItemNotificationEventArgs args)
+        {
+            try
+            {
+                if (_parameter_nodes.TryGetValue(nodeId, out var pv))
+                {
+                    pv.UpdateFromDataValue(value);
+                    return;
+                }
+                if (_monitoring_nodes.TryGetValue(nodeId, out var mv))
+                {
+                    mv.UpdateFromDataValue(value);
+                    return;
+                }
+                if (_attribute_nodes.TryGetValue(nodeId, out var av))
+                {
+                    av.UpdateFromDataValue(value);
+                    return;
+                }
+            }
+            catch { }
+        }
+
+        // simple event notification handler for Messages event subscription
+        public void EventNotification(MonitoredItem item, MonitoredItemNotificationEventArgs args)
+        {
+            try
+            {
+                var text = args.NotificationValue?.ToString() ?? "<event>";
+                foreach (var sub in _subscribers)
+                {
+                    try { sub.OnNewMessage(this, text, 0, ""); } catch { }
+                }
+            }
+            catch { }
+        }
+
+        // Helper for tests: register a monitoring variable mapping
+        public void RegisterMonitoringNode(RemoteVariable rv)
+        {
+            if (rv == null) return;
+            Monitoring[rv.Name] = rv;
+            try { _monitoring_nodes[rv.NodeId] = rv; } catch { }
+        }
+
+        public async Task SetupSubscriptionsAsync(SubscriptionManager subscriptionManager, bool createSubscriptions = false)
+        {
+            var session = RemoteServerClient.Session ?? throw new InvalidOperationException("No session");
+
+            var browser = new Browser(session)
+            {
+                BrowseDirection = BrowseDirection.Forward,
+                ReferenceTypeId = ReferenceTypeIds.HierarchicalReferences,
+                NodeClassMask = (int)(NodeClass.Object | NodeClass.Variable | NodeClass.Method)
+            };
+
+            ReferenceDescriptionCollection refs = null;
+            try { refs = await browser.BrowseAsync(BaseNodeId); } catch { }
+            if (refs == null) return;
+
+            var sem = new System.Threading.SemaphoreSlim(8);
+            var tasks = new System.Collections.Generic.List<System.Threading.Tasks.Task>();
+
+            foreach (var r in refs)
+            {
+                try
+                {
+                    if (r?.NodeId == null) continue;
+                    var expanded = r.NodeId as ExpandedNodeId ?? new ExpandedNodeId(r.NodeId);
+                    var childId = UaHelpers.ToNodeId(expanded, session);
+                    if (childId == null) continue;
+                    var childName = r.DisplayName?.Text ?? r.BrowseName?.Name ?? "";
+
+                    async System.Threading.Tasks.Task ProcessChildAsync()
+                    {
+                        try
+                        {
+                            if (string.Equals(childName, "SkillSet", StringComparison.OrdinalIgnoreCase))
+                            {
+                                var skillSetNode = await SessionBrowseCache.TranslatePathAsync(session, BaseNodeId, new[] { "SkillSet" }) ?? childId;
+                                try
+                                {
+                                    var subRefs = await (new Browser(session) { BrowseDirection = BrowseDirection.Forward }).BrowseAsync(skillSetNode);
+                                    if (subRefs != null)
+                                    {
+                                        foreach (var sr in subRefs)
+                                        {
+                                            try
+                                            {
+                                                if (sr?.NodeId == null) continue;
+                                                var expanded2 = sr.NodeId as ExpandedNodeId ?? new ExpandedNodeId(sr.NodeId);
+                                                var skillId = UaHelpers.ToNodeId(expanded2, session);
+                                                if (skillId == null) continue;
+                                                var skillName = sr.DisplayName?.Text ?? sr.BrowseName?.Name ?? skillId.ToString();
+                                                var browseName = sr.BrowseName?.Name ?? "";
+                                                if (!string.IsNullOrEmpty(browseName) && (browseName.EndsWith("Type", StringComparison.OrdinalIgnoreCase) || browseName.IndexOf("SkillExecution", StringComparison.OrdinalIgnoreCase) >= 0)) continue;
+                                                var rs = new RemoteSkill(skillName, skillId, RemoteServerClient, _remoteServer);
+                                                SkillSet[skillName] = rs;
+                                                try { await rs.SetupSubscriptionsAsync(subscriptionManager, createSubscriptions); } catch { }
+                                            }
+                                            catch { }
+                                        }
+                                    }
+                                }
+                                catch { }
+                            }
+                            else if (string.Equals(childName, "Monitoring", StringComparison.OrdinalIgnoreCase))
+                            {
+                                var nodeMap = new System.Collections.Generic.Dictionary<NodeId, RemoteVariable>();
+                                try { await RemoteVariableCollector.AddVariableNodesAsync(session, childId, nodeMap, Monitoring, false); } catch { }
+                                foreach (var kv in nodeMap) _monitoring_nodes[kv.Key] = kv.Value;
+                                // inject client reference into each RemoteVariable so WriteValue can work
+                                foreach (var v in Monitoring.Values) v.SetClient(RemoteServerClient);
+                                
+                                
+                                
+                                
+                                if (_monitoring_nodes.Count > 0 && createSubscriptions)
+                                {
+                                     try { await subscriptionManager.SubscribeDataChangeAsync(this, _monitoring_nodes.Keys); } catch { }
+                                 }
+                             }
+                             else if (string.Equals(childName, "ParameterSet", StringComparison.OrdinalIgnoreCase))
+                             {
+                                 var nodeMap = new System.Collections.Generic.Dictionary<NodeId, RemoteVariable>();
+                                 try { await RemoteVariableCollector.AddVariableNodesAsync(session, childId, nodeMap, ParameterSet, true); } catch { }
+                                 foreach (var kv in nodeMap) _parameter_nodes[kv.Key] = kv.Value;
+                                 foreach (var v in ParameterSet.Values) v.SetClient(RemoteServerClient);
+                                 if (_parameter_nodes.Count > 0 && createSubscriptions)
+                                 {
+                                     try { await subscriptionManager.SubscribeDataChangeAsync(this, _parameter_nodes.Keys); } catch { }
+                                 }
+                             }
+                             else if (string.Equals(childName, "Attributes", StringComparison.OrdinalIgnoreCase) || string.Equals(childName, "Identification", StringComparison.OrdinalIgnoreCase))
+                             {
+                                 var nodeMap = new System.Collections.Generic.Dictionary<NodeId, RemoteVariable>();
+                                 try { await RemoteVariableCollector.AddVariableNodesAsync(session, childId, nodeMap, Attributes, false); } catch { }
+                                 foreach (var kv in nodeMap) _attribute_nodes[kv.Key] = kv.Value;
+                                 foreach (var v in Attributes.Values) v.SetClient(RemoteServerClient);
+                                 if (_attribute_nodes.Count > 0 && createSubscriptions)
+                                 {
+                                     try { await subscriptionManager.SubscribeDataChangeAsync(this, _parameter_nodes.Keys); } catch { }
+                                 }
+                             }
+                             else if (string.Equals(childName, "Components", StringComparison.OrdinalIgnoreCase))
+                             {
+                                 try
+                                 {
+                                     var combined = new System.Collections.Generic.List<ReferenceDescription>();
+                                     var browserHasComp = new Browser(session)
+                                     {
+                                         BrowseDirection = BrowseDirection.Forward,
+                                         ReferenceTypeId = ReferenceTypeIds.HasComponent,
+                                         NodeClassMask = (int)(NodeClass.Object | NodeClass.Variable | NodeClass.Method)
+                                     };
+                                     try
+                                     {
+                                         var refs1 = await browserHasComp.BrowseAsync(childId);
+                                         if (refs1 != null)
+                                         {
+                                             foreach (var rdesc in refs1) if (rdesc != null) combined.Add(rdesc);
+                                         }
+                                     }
+                                     catch { }
+                                     var browserOrg = new Browser(session)
+                                     {
+                                         BrowseDirection = BrowseDirection.Forward,
+                                         ReferenceTypeId = ReferenceTypeIds.Organizes,
+                                         NodeClassMask = (int)(NodeClass.Object | NodeClass.Variable | NodeClass.Method)
+                                     };
+                                     try
+                                     {
+                                         var refs2 = await browserOrg.BrowseAsync(childId);
+                                         if (refs2 != null)
+                                         {
+                                             foreach (var rdesc in refs2) if (rdesc != null && !combined.Any(x => x.NodeId?.ToString() == rdesc.NodeId?.ToString())) combined.Add(rdesc);
+                                         }
+                                     }
+                                     catch { }
+                                     if (combined.Count > 0)
+                                     {
+                                         var inner = new System.Collections.Generic.List<System.Threading.Tasks.Task>();
+                                         foreach (var sr in combined)
+                                         {
+                                             inner.Add(System.Threading.Tasks.Task.Run(async () =>
+                                             {
+                                                 try
+                                                 {
+                                                     if (sr?.NodeId == null) return;
+                                                     var expanded2 = sr.NodeId as ExpandedNodeId ?? new ExpandedNodeId(sr.NodeId);
+                                                     var compId = UaHelpers.ToNodeId(expanded2, session);
+                                                     if (compId == null) return;
+                                                     var compName = sr.DisplayName?.Text ?? sr.BrowseName?.Name ?? compId.ToString();
+                                                     var bn = sr.BrowseName?.Name ?? string.Empty;
+                                                     if (!string.IsNullOrEmpty(bn) && bn.IndexOf("SkillExecution", StringComparison.OrdinalIgnoreCase) >= 0) return;
+                                                     var rc = new RemoteComponent(compName, compId, RemoteServerClient, _remoteServer);
+                                                     Components[compName] = rc;
+                                                     try { await rc.SetupSubscriptionsAsync(subscriptionManager, createSubscriptions); } catch { }
+                                                 }
+                                                 catch { }
+                                             }));
+                                         }
+                                         try { await System.Threading.Tasks.Task.WhenAll(inner); } catch { }
+                                     }
+                                 }
+                                 catch { }
+                             }
+                             else if (string.Equals(childName, "Notification", StringComparison.OrdinalIgnoreCase))
+                             {
+                                 try
+                                 {
+                                     var subRefs = await (new Browser(session) { BrowseDirection = BrowseDirection.Forward }).BrowseAsync(childId);
+                                     if (subRefs != null)
+                                     {
+                                         foreach (var sr in subRefs)
+                                         {
+                                             try
+                                             {
+                                                 if (sr?.NodeId == null) continue;
+                                                 var expanded2 = sr.NodeId as ExpandedNodeId ?? new ExpandedNodeId(sr.NodeId);
+                                                 var nodeId = UaHelpers.ToNodeId(expanded2, session);
+                                                 if (nodeId == null) continue;
+                                                 var nodeName = sr.DisplayName?.Text ?? sr.BrowseName?.Name ?? nodeId.ToString();
+                                                 if (string.Equals(nodeName, "Messages", StringComparison.OrdinalIgnoreCase))
+                                                 {
+                                                     if (createSubscriptions)
+                                                     {
+                                                         try { await subscriptionManager.AddEventMonitoredItemAsync(nodeId, (m, e) => EventNotification(m, e)); } catch { }
+                                                     }
+                                                 }
+                                             }
+                                             catch { }
+                                         }
+                                     }
+                                 }
+                                 catch { }
+                             }
+                             else if (string.Equals(childName, "MethodSet", StringComparison.OrdinalIgnoreCase))
+                             {
+                                 try
+                                 {
+                                     var subRefs = await (new Browser(session) { BrowseDirection = BrowseDirection.Forward }).BrowseAsync(childId);
+                                     if (subRefs != null)
+                                     {
+                                         foreach (var sr in subRefs)
+                                         {
+                                             try
+                                             {
+                                                 if (sr?.NodeId == null) continue;
+                                                 var expanded2 = sr.NodeId as ExpandedNodeId ?? new ExpandedNodeId(sr.NodeId);
+                                                 var methodId = UaHelpers.ToNodeId(expanded2, session);
+                                                 if (methodId == null) continue;
+                                                 var methodName = sr.DisplayName?.Text ?? sr.BrowseName?.Name ?? methodId.ToString();
+                                             }
+                                             catch { }
+                                         }
+                                     }
+                                 }
+                                 catch { }
+                             }
+                         }
+                         catch { }
+                     }
+
+                    await sem.WaitAsync();
+                    var t = ProcessChildAsync().ContinueWith(_ => sem.Release());
+                    tasks.Add(t);
+                }
+                catch { }
+            }
+
+            try { await System.Threading.Tasks.Task.WhenAll(tasks); } catch { }
+        }
+
+        // Convenience helpers similar to Python's get_child / get_children
+        public object? GetChild(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return null;
+            if (Components.TryGetValue(name, out var comp)) return comp;
+            if (SkillSet.TryGetValue(name, out var skill)) return skill;
+            if (FeasibilityCheckSet.TryGetValue(name, out var feas)) return feas;
+            if (PreconditionCheckSet.TryGetValue(name, out var prec)) return prec;
+            if (MethodSet.TryGetValue(name, out var method)) return method;
+            if (Monitoring.TryGetValue(name, out var mon)) return mon;
+            if (ParameterSet.TryGetValue(name, out var param)) return param;
+            if (Attributes.TryGetValue(name, out var attr)) return attr;
+            return null;
+        }
+
+        public System.Collections.Generic.IEnumerable<(string name, string type)> GetChildren()
+        {
+            var list = new List<(string, string)>();
+            foreach (var k in Components.Keys) list.Add((k, "Component"));
+            foreach (var k in SkillSet.Keys) list.Add((k, "Skill"));
+            foreach (var k in FeasibilityCheckSet.Keys) list.Add((k, "FeasibilitySkill"));
+            foreach (var k in PreconditionCheckSet.Keys) list.Add((k, "PreconditionSkill"));
+            foreach (var k in MethodSet.Keys) list.Add((k, "Method"));
+            foreach (var k in Monitoring.Keys) list.Add((k, "MonitoringVariable"));
+            foreach (var k in ParameterSet.Keys) list.Add((k, "Parameter"));
+            foreach (var k in Attributes.Keys) list.Add((k, "Attribute"));
+            return list;
+        }
+    }
+}
