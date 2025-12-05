@@ -1004,8 +1004,15 @@ namespace UAClient.Client
                 try
                 {
                     var owner = await lockObj.GetLockOwnerAsync(session);
+                    
+                    // Remove quotes from owner string (OPC UA might return "'localhost'" instead of "localhost")
+                    if (!string.IsNullOrEmpty(owner))
+                    {
+                        owner = owner.Trim('\'', '"', ' ');
+                    }
+                    
                     var ourAppName = _client?.Configuration?.ApplicationName ?? string.Empty;
-                    var ourHostname = System.Net.Dns.GetHostName(); // NEW: Get computer hostname
+                    var ourHostname = System.Net.Dns.GetHostName(); // Get computer hostname
                     
                     UAClient.Common.Log.Debug($"RemoteModule '{Name}': Lock owner='{owner}', AppName='{ourAppName}', Hostname='{ourHostname}'");
                     
