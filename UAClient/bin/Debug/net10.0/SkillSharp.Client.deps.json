@@ -1,0 +1,163 @@
+{
+  "runtimeTarget": {
+    "name": ".NETCoreApp,Version=v10.0",
+    "signature": ""
+  },
+  "compilationOptions": {},
+  "targets": {
+    ".NETCoreApp,Version=v10.0": {
+      "SkillSharp.Client/1.0.0": {
+        "dependencies": {
+          "OPCFoundation.NetStandard.Opc.Ua.Client": "1.5.377.22",
+          "OPCFoundation.NetStandard.Opc.Ua.Core": "1.5.377.22"
+        },
+        "runtime": {
+          "SkillSharp.Client.dll": {}
+        }
+      },
+      "BitFaster.Caching/2.5.4": {
+        "runtime": {
+          "lib/net6.0/BitFaster.Caching.dll": {
+            "assemblyVersion": "2.5.4.0",
+            "fileVersion": "2.5.4.0"
+          }
+        }
+      },
+      "Microsoft.Extensions.DependencyInjection.Abstractions/9.0.9": {
+        "runtime": {
+          "lib/net9.0/Microsoft.Extensions.DependencyInjection.Abstractions.dll": {
+            "assemblyVersion": "9.0.0.0",
+            "fileVersion": "9.0.925.41916"
+          }
+        }
+      },
+      "Microsoft.Extensions.Logging.Abstractions/9.0.9": {
+        "dependencies": {
+          "Microsoft.Extensions.DependencyInjection.Abstractions": "9.0.9"
+        },
+        "runtime": {
+          "lib/net9.0/Microsoft.Extensions.Logging.Abstractions.dll": {
+            "assemblyVersion": "9.0.0.0",
+            "fileVersion": "9.0.925.41916"
+          }
+        }
+      },
+      "Newtonsoft.Json/13.0.3": {
+        "runtime": {
+          "lib/net6.0/Newtonsoft.Json.dll": {
+            "assemblyVersion": "13.0.0.0",
+            "fileVersion": "13.0.3.27908"
+          }
+        }
+      },
+      "OPCFoundation.NetStandard.Opc.Ua.Client/1.5.377.22": {
+        "dependencies": {
+          "BitFaster.Caching": "2.5.4",
+          "OPCFoundation.NetStandard.Opc.Ua.Configuration": "1.5.377.22",
+          "OPCFoundation.NetStandard.Opc.Ua.Core": "1.5.377.22"
+        },
+        "runtime": {
+          "lib/net9.0/Opc.Ua.Client.dll": {
+            "assemblyVersion": "1.5.377.0",
+            "fileVersion": "1.5.377.22"
+          }
+        }
+      },
+      "OPCFoundation.NetStandard.Opc.Ua.Configuration/1.5.377.22": {
+        "dependencies": {
+          "OPCFoundation.NetStandard.Opc.Ua.Core": "1.5.377.22"
+        },
+        "runtime": {
+          "lib/net9.0/Opc.Ua.Configuration.dll": {
+            "assemblyVersion": "1.5.377.0",
+            "fileVersion": "1.5.377.22"
+          }
+        }
+      },
+      "OPCFoundation.NetStandard.Opc.Ua.Core/1.5.377.22": {
+        "dependencies": {
+          "Microsoft.Extensions.Logging.Abstractions": "9.0.9",
+          "Newtonsoft.Json": "13.0.3",
+          "OPCFoundation.NetStandard.Opc.Ua.Security.Certificates": "1.5.377.22"
+        },
+        "runtime": {
+          "lib/net9.0/Opc.Ua.Core.dll": {
+            "assemblyVersion": "1.5.377.0",
+            "fileVersion": "1.5.377.22"
+          }
+        }
+      },
+      "OPCFoundation.NetStandard.Opc.Ua.Security.Certificates/1.5.377.22": {
+        "runtime": {
+          "lib/net9.0/Opc.Ua.Security.Certificates.dll": {
+            "assemblyVersion": "1.5.377.0",
+            "fileVersion": "1.5.377.22"
+          }
+        }
+      }
+    }
+  },
+  "libraries": {
+    "SkillSharp.Client/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "BitFaster.Caching/2.5.4": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-1QroTY1PVCZOSG9FnkkCrmCKk/+bZCgI/YXq376HnYwUDJ4Ho0EaV4YaA/5v5WYLnwIwIO7RZkdWbg9pxIpueQ==",
+      "path": "bitfaster.caching/2.5.4",
+      "hashPath": "bitfaster.caching.2.5.4.nupkg.sha512"
+    },
+    "Microsoft.Extensions.DependencyInjection.Abstractions/9.0.9": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-/hymojfWbE9AlDOa0mczR44m00Jj+T3+HZO0ZnVTI032fVycI0ZbNOVFP6kqZMcXiLSYXzR2ilcwaRi6dzeGyA==",
+      "path": "microsoft.extensions.dependencyinjection.abstractions/9.0.9",
+      "hashPath": "microsoft.extensions.dependencyinjection.abstractions.9.0.9.nupkg.sha512"
+    },
+    "Microsoft.Extensions.Logging.Abstractions/9.0.9": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-FEgpSF+Z9StMvrsSViaybOBwR0f0ZZxDm8xV5cSOFiXN/t+ys+rwAlTd/6yG7Ld1gfppgvLcMasZry3GsI9lGA==",
+      "path": "microsoft.extensions.logging.abstractions/9.0.9",
+      "hashPath": "microsoft.extensions.logging.abstractions.9.0.9.nupkg.sha512"
+    },
+    "Newtonsoft.Json/13.0.3": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-HrC5BXdl00IP9zeV+0Z848QWPAoCr9P3bDEZguI+gkLcBKAOxix/tLEAAHC+UvDNPv4a2d18lOReHMOagPa+zQ==",
+      "path": "newtonsoft.json/13.0.3",
+      "hashPath": "newtonsoft.json.13.0.3.nupkg.sha512"
+    },
+    "OPCFoundation.NetStandard.Opc.Ua.Client/1.5.377.22": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-jMmCp7tuWCT0mVLtPQ80fAK2EuJ3+S+RJx6xml1kjb3NnBIthS6UJLjgJgUVO1tK9H/NgqI3TOmY92uv5E8JWQ==",
+      "path": "opcfoundation.netstandard.opc.ua.client/1.5.377.22",
+      "hashPath": "opcfoundation.netstandard.opc.ua.client.1.5.377.22.nupkg.sha512"
+    },
+    "OPCFoundation.NetStandard.Opc.Ua.Configuration/1.5.377.22": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-XMY7TSZkqvzx9qUJWpxw38UO+2Z4Qt1pKvq5bVOjRpnTM/xQ4JWSfpYghtSc6Ud3IUConwkn8E/aPRRYMGgNOA==",
+      "path": "opcfoundation.netstandard.opc.ua.configuration/1.5.377.22",
+      "hashPath": "opcfoundation.netstandard.opc.ua.configuration.1.5.377.22.nupkg.sha512"
+    },
+    "OPCFoundation.NetStandard.Opc.Ua.Core/1.5.377.22": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-vKZG6Spa8ugUfs83dfrelc9jsIr9Q3HblM5rSJ1KNox5VizdUhNRfBk+1wEIgrxCsJpzKwlFW804h/Y/YZxcEw==",
+      "path": "opcfoundation.netstandard.opc.ua.core/1.5.377.22",
+      "hashPath": "opcfoundation.netstandard.opc.ua.core.1.5.377.22.nupkg.sha512"
+    },
+    "OPCFoundation.NetStandard.Opc.Ua.Security.Certificates/1.5.377.22": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-ztXUJ6YXmo3lxMAbRMlAjjeCX/yEjNLsOAyyaDgtz+5Z/63eY/1Pur1JEUX2/drpMgyyNoiRikySPNwTT2Th2w==",
+      "path": "opcfoundation.netstandard.opc.ua.security.certificates/1.5.377.22",
+      "hashPath": "opcfoundation.netstandard.opc.ua.security.certificates.1.5.377.22.nupkg.sha512"
+    }
+  }
+}

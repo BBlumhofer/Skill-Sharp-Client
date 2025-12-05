@@ -17,6 +17,9 @@ namespace UAClient.Client
         public NodeId BaseNodeId { get; }
         public IDictionary<string, BaseRemoteCallable> Methods { get; } = new Dictionary<string, BaseRemoteCallable>();
         public RemoteLock? Lock { get; private set; }
+        
+        public bool IsLockedByUs { get { lock (this) { return _isLockedByUs; } } private set { lock (this) { _isLockedByUs = value; } }}
+    private bool _isLockedByUs = false;
         public IDictionary<string, RemotePort> Ports { get; } = new Dictionary<string, RemotePort>();
         public IDictionary<string, RemoteStorage> Storages { get; } = new Dictionary<string, RemoteStorage>();
         public IDictionary<string, RemoteComponent> Components { get; } = new Dictionary<string, RemoteComponent>(StringComparer.OrdinalIgnoreCase);
@@ -973,48 +976,8 @@ namespace UAClient.Client
             RemoteLock? lockObj = Lock;
 
             // If not present, try to discover a candidate under the module node
-            if (lockObj == null)
-            {
-                try
-                {
-                    var browser = new Browser(session)
-                    {
-                        BrowseDirection = BrowseDirection.Forward,
-                        ReferenceTypeId = ReferenceTypeIds.HierarchicalReferences,
-                        NodeClassMask = (int)(NodeClass.Object | NodeClass.Variable | NodeClass.Method)
-                    };
-                    var refs = await browser.BrowseAsync(BaseNodeId);
-                    if (refs != null)
-                    {
-                        foreach (var r in refs)
-                        {
-                            try
-                            {
-                                if (r?.NodeId == null) continue;
-                                var expanded = r.NodeId as ExpandedNodeId ?? new ExpandedNodeId(r.NodeId);
-                                var candidateId = UaHelpers.ToNodeId(expanded, session);
-                                if (candidateId == null) continue;
-                                var candidateName = r.DisplayName?.Text ?? r.BrowseName?.Name ?? string.Empty;
-                                // If name suggests Lock or type matches LockingServicesType, choose it
-                                if (candidateName.IndexOf("Lock", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                                    await IsTypeOrSubtypeOfAsync(session, candidateId, new System.Collections.Generic.HashSet<string> { "LockingServicesType" }))
-                                {
-                                    lockObj = new RemoteLock(candidateName, candidateId);
-                                    await RemoteVariableCollector.AddVariableNodesAsync(session, candidateId, lockObj.NodeMap, lockObj.Variables, true);
-                                    Lock = lockObj;
-                                    UAClient.Common.Log.Info($"RemoteModule '{Name}': discovered Lock candidate '{candidateName}' via fallback");
-                                    break;
-                                }
-                            }
-                            catch { }
-                        }
-                    }
-                }
-                catch { }
-            }
-
             if (lockObj == null) return null;
-
+            
             UAClient.Common.Log.Info($"Locking module {Name} via lock {lockObj.Name}");
             try
             {
@@ -1023,20 +986,65 @@ namespace UAClient.Client
                 if (!initOk)
                 {
                     UAClient.Common.Log.Warn($"RemoteModule '{Name}': InitLock call did not succeed (or no lock method found)");
+                    IsLockedByUs = false;
+                    return false;
                 }
+                
                 var waitTimeout = TimeSpan.FromSeconds(10);
                 var lockedNow = await lockObj.WaitForLockedAsync(session, waitTimeout);
-                var lockedText = lockedNow ? "true" : "false/timeout";
-                UAClient.Common.Log.Info($"Module locked state={lockedText}");
+                
                 if (!lockedNow)
                 {
                     UAClient.Common.Log.Warn($"Module lock not confirmed for {Name} after {waitTimeout.TotalSeconds}s");
+                    IsLockedByUs = false;
+                    return false;
                 }
-                return lockedNow;
+                
+                // NEW: Check if WE are the owner
+                try
+                {
+                    var owner = await lockObj.GetLockOwnerAsync(session);
+                    var ourAppName = _client?.Configuration?.ApplicationName ?? string.Empty;
+                    var ourHostname = System.Net.Dns.GetHostName(); // NEW: Get computer hostname
+                    
+                    UAClient.Common.Log.Debug($"RemoteModule '{Name}': Lock owner='{owner}', AppName='{ourAppName}', Hostname='{ourHostname}'");
+                    
+                    if (!string.IsNullOrEmpty(owner))
+                    {
+                        // Check if owner contains ApplicationName OR Hostname
+                        if ((!string.IsNullOrEmpty(ourAppName) && owner.IndexOf(ourAppName, StringComparison.OrdinalIgnoreCase) >= 0) ||
+                            (!string.IsNullOrEmpty(ourHostname) && owner.IndexOf(ourHostname, StringComparison.OrdinalIgnoreCase) >= 0))
+                        {
+                            UAClient.Common.Log.Info($"RemoteModule '{Name}': Successfully locked by us (Owner: {owner})");
+                            IsLockedByUs = true;
+                            return true;
+                        }
+                        else
+                        {
+                            UAClient.Common.Log.Warn($"RemoteModule '{Name}': Module is locked by different client. Owner: '{owner}', Our AppName: '{ourAppName}', Our Hostname: '{ourHostname}'");
+                            IsLockedByUs = false;
+                            return false;
+                        }
+                    }
+                    else
+                    {
+                        // Owner konnte nicht ermittelt werden, assume success wenn locked
+                        UAClient.Common.Log.Warn($"RemoteModule '{Name}': Could not determine lock owner, assuming lock is ours");
+                        IsLockedByUs = true;
+                        return true;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    UAClient.Common.Log.Warn($"RemoteModule '{Name}': Owner verification failed: {ex.Message}. Assuming lock is ours.");
+                    IsLockedByUs = true;
+                    return true;
+                }
             }
             catch (Exception ex)
             {
                 UAClient.Common.Log.Warn($"Lock init failed: {ex.Message}");
+                IsLockedByUs = false;
                 return null;
             }
         }
@@ -1047,6 +1055,7 @@ namespace UAClient.Client
 
             var lockObj = Lock;
             if (lockObj == null) return null;
+    
             UAClient.Common.Log.Info($"Unlocking module {Name} via lock {lockObj.Name}");
             try
             {
@@ -1054,6 +1063,9 @@ namespace UAClient.Client
                 var locked = await lockObj.IsLockedAsync(session);
                 var lockedText = locked.HasValue ? (locked.Value ? "true" : "false") : "unknown";
                 UAClient.Common.Log.Info($"Module locked state after unlock={lockedText}");
+                
+                IsLockedByUs = false;  // NEW: Reset flag
+                
                 return locked;
             }
             catch (Exception ex)

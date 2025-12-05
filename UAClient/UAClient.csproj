@@ -1,10 +1,15 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <OutputType>Exe</OutputType>
+    <OutputType>Library</OutputType>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <RootNamespace>SkillSharp.Client</RootNamespace>
+    <AssemblyName>SkillSharp.Client</AssemblyName>
+    <PackageId>SkillSharp.Client</PackageId>
+    <Version>1.0.0</Version>
+    <Description>OPC UA Client Library for Skill-based Manufacturing Systems</Description>
     <!-- Ensure runtime config is generated and required assemblies are copied to output to avoid host mismatches -->
     <GenerateRuntimeConfigurationFiles>true</GenerateRuntimeConfigurationFiles>
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
