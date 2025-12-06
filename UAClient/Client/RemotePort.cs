@@ -139,7 +139,7 @@ namespace UAClient.Client
             }
             if (couple == null)
             {
-                // passive port, nothing to do — add diagnostics to help identify why no couple skill found
+                // passive port, nothing to do ï¿½ add diagnostics to help identify why no couple skill found
                 try
                 {
                     UAClient.Common.Log.Info($"RemotePort '{Name}': no CoupleSkill found on port or module; treating as passive port");
@@ -266,7 +266,7 @@ namespace UAClient.Client
 
             try
             {
-                await couple.StopAsync();
+                await couple.HaltAsync();
                 await couple.WaitForStateAsync(UAClient.Common.SkillStates.Halted, timeout.Value);
                 var resetMethod = await couple.FindMethodNodeRecursive(client.Session, couple.BaseNodeId, "Reset");
                 if (resetMethod != null)

@@ -16,8 +16,7 @@ namespace UAClient.Client
         private NodeId? _currentStateNode;
         private NodeId? _startMethodNode;
         private NodeId? _resetMethodNode;
-        private NodeId? _stopMethodNode;
-        private NodeId? _abortMethodNode;
+        private NodeId? _haltMethodNode;
         private bool? _isFiniteHint = null;
 
         // cached state + subscribers (mirror Python behaviour)
@@ -30,8 +29,7 @@ namespace UAClient.Client
         public NodeId? CurrentStateNode => _currentStateNode;
         public NodeId? StartMethodNode => _startMethodNode;
         public NodeId? ResetMethodNode => _resetMethodNode;
-        public NodeId? StopMethodNode => _stopMethodNode;
-        public NodeId? AbortMethodNode => _abortMethodNode;
+        public NodeId? HaltMethodNode => _haltMethodNode;
 
         // Expose a RemoteVariable for the current state if available via Monitoring map
         public RemoteVariable? CurrentStateVariable
@@ -817,18 +815,18 @@ namespace UAClient.Client
             }
         }
 
-        public async Task StopAsync()
+        public async Task HaltAsync()
         {
             var session = RemoteServerClient.Session ?? throw new InvalidOperationException("No session");
-            var methodId = _stopMethodNode ?? await FindMethodNodeRecursive(session, BaseNodeId, "Stop");
+            var methodId = _haltMethodNode ?? await FindMethodNodeRecursive(session, BaseNodeId, "Halt");
             if (methodId == null) return;
             await session.CallAsync(BaseNodeId, methodId, System.Threading.CancellationToken.None);
         }
 
-        public async Task AbortAsync()
+        public async Task ResetAsync()
         {
             var session = RemoteServerClient.Session ?? throw new InvalidOperationException("No session");
-            var methodId = _abortMethodNode ?? await FindMethodNodeRecursive(session, BaseNodeId, "Abort");
+            var methodId = _resetMethodNode ?? await FindMethodNodeRecursive(session, BaseNodeId, "Reset");
             if (methodId == null) return;
             await session.CallAsync(BaseNodeId, methodId, System.Threading.CancellationToken.None);
         }

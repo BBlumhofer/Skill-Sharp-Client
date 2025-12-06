@@ -302,10 +302,10 @@ namespace UAClient
                                 await WithTimeout(targetModule.LockAsync(session), TimeSpan.FromSeconds(10));
                                 await WithTimeout(targetModule.StartAsync(reset: true, timeout: TimeSpan.FromSeconds(60)), TimeSpan.FromSeconds(70));
 
-                                UAClient.Common.Log.Info("Enabling auto-relock for manual break test (60s)...");
-                                await targetModule.EnableAutoRelockAsync();
+                                UAClient.Common.Log.Info("Enabling auto-recovery for manual break test (60s)...");
+                                await targetModule.EnableAutoRecoveryAsync();
 
-                                Console.WriteLine("Auto-relock enabled for 60 seconds.");
+                                Console.WriteLine("Auto-recovery enabled for 60 seconds.");
                                 Console.WriteLine("Please break the module lock from the operator console now (or simulate).\nPress ENTER to finish early.");
 
                                 var cts = new CancellationTokenSource();
@@ -317,7 +317,7 @@ namespace UAClient
                                         try
                                         {
                                             var locked = await targetModule.Lock?.IsLockedAsync(client.Session!);
-                                            Console.WriteLine($"[AutoRelock] Locked={locked}");
+                                            Console.WriteLine($"[AutoRecovery] Locked={locked}");
                                         }
                                         catch { }
                                         await Task.Delay(5000, cts.Token);
@@ -328,8 +328,8 @@ namespace UAClient
                                 await Task.WhenAny(waitTask, inputTask);
                                 try { cts.Cancel(); } catch { }
 
-                                UAClient.Common.Log.Info("Disabling auto-relock after test window...");
-                                try { await targetModule.DisableAutoRelockAsync(); } catch { }
+                                UAClient.Common.Log.Info("Disabling auto-recovery after test window...");
+                                try { await targetModule.DisableAutoRecoveryAsync(); } catch { }
 
                                 return 0;
                             }
@@ -347,11 +347,11 @@ namespace UAClient
                             {
                                 try { targetModule.AllowLockFallback = true; } catch { }
 
-                                UAClient.Common.Log.Info("Enabling auto-ready for test window (60s)...");
-                                await targetModule.EnableAutoReadyAsync(TimeSpan.FromSeconds(5));
+                                UAClient.Common.Log.Info("Enabling auto-recovery for test window (60s)...");
+                                await targetModule.EnableAutoRecoveryAsync();
 
-                                Console.WriteLine("Auto-ready enabled for 60 seconds.");
-                                Console.WriteLine("Module will be made ready periodically. Press ENTER to finish early.");
+                                Console.WriteLine("Auto-recovery enabled for 60 seconds.");
+                                Console.WriteLine("Module will be made ready and recovered automatically. Press ENTER to finish early.");
 
                                 var cts2 = new CancellationTokenSource();
                                 var waitTask2 = Task.Run(async () =>
@@ -361,7 +361,7 @@ namespace UAClient
                                     {
                                         try
                                         {
-                                            Console.WriteLine($"[AutoReady] IsReady={targetModule.IsReady}");
+                                            Console.WriteLine($"[AutoRecovery] IsReady={targetModule.IsReady}");
                                         }
                                         catch { }
                                         await Task.Delay(5000, cts2.Token);
@@ -372,8 +372,8 @@ namespace UAClient
                                 await Task.WhenAny(waitTask2, inputTask2);
                                 try { cts2.Cancel(); } catch { }
 
-                                UAClient.Common.Log.Info("Disabling auto-ready after test window...");
-                                try { await targetModule.DisableAutoReadyAsync(); } catch { }
+                                UAClient.Common.Log.Info("Disabling auto-recovery after test window...");
+                                try { await targetModule.DisableAutoRecoveryAsync(); } catch { }
 
                                 return 0;
                             }

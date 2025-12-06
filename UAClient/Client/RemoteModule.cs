@@ -1277,139 +1277,323 @@ namespace UAClient.Client
         private readonly List<MonitoredItem> _autoReadyMonitoredItems = new List<MonitoredItem>();
         private int _makeReadyInProgress = 0; // atomic flag
 
-        /// <summary>
-        /// Enable auto-ready: periodically ensure module is locked, first port coupled and startup skill running.
-        /// </summary>
-        public Task EnableAutoReadyAsync(TimeSpan? checkInterval = null)
-        {
-            if (_autoReadyEnabled) return Task.CompletedTask;
-            _autoReadyEnabled = true;
-            checkInterval ??= TimeSpan.FromSeconds(5);
-            _autoReadyCts = new CancellationTokenSource();
-            var ct = _autoReadyCts.Token;
+        // Auto-recovery control (NEW - subscription-based recovery)
+        private bool _autoRecoveryEnabled = false;
+        private readonly List<MonitoredItem> _autoRecoveryMonitoredItems = new List<MonitoredItem>();
+        private int _recoveryInProgress = 0; // atomic flag
 
-            // Try to create subscriptions to Lock state so we react immediately when unlocked
+        /// <summary>
+        /// Enable auto-recovery: subscribe to Lock state and StartupSkill state,
+        /// automatically trigger recovery (halt all skills, re-lock, restart startup) on loss.
+        /// </summary>
+        public async Task EnableAutoRecoveryAsync()
+        {
+            if (_autoRecoveryEnabled) return;
+            _autoRecoveryEnabled = true;
+
             try
             {
                 var subMgr = _remoteServer?.SubscriptionManager;
                 var session = _client?.Session;
-                if (subMgr != null && session != null && Lock != null)
+                if (subMgr == null || session == null)
                 {
-                    // prefer descriptor CurrentState then Locked variable
-                    if (Lock.CurrentState != null)
-                    {
-                        UAClient.Common.Log.Debug($"EnableAutoReadyAsync: subscribing to Lock.CurrentState node={Lock.CurrentState.NodeId}");
-                        var mi = subMgr.AddMonitoredItemAsync(Lock.CurrentState.NodeId, (m, e) => { _ = Task.Run(async () => await OnAutoReadyLockChangedAsync()); }).GetAwaiter().GetResult();
-                        lock (_autoReadyMonitoredItems) { _autoReadyMonitoredItems.Add(mi); }
-                    }
-                    else if (Lock.Variables.TryGetValue("Locked", out var lockedVar))
-                    {
-                        UAClient.Common.Log.Debug($"EnableAutoReadyAsync: subscribing to Lock.Locked node={lockedVar.NodeId}");
-                        var mi = subMgr.AddMonitoredItemAsync(lockedVar.NodeId, (m, e) => { _ = Task.Run(async () => await OnAutoReadyLockChangedAsync()); }).GetAwaiter().GetResult();
-                        lock (_autoReadyMonitoredItems) { _autoReadyMonitoredItems.Add(mi); }
-                    }
+                    UAClient.Common.Log.Warn($"RemoteModule '{Name}': Cannot enable auto-recovery - no SubscriptionManager or Session");
+                    return;
                 }
-            }
-            catch (Exception ex)
-            {
-                UAClient.Common.Log.Debug($"EnableAutoReadyAsync: owner subscription failed: {ex.Message}");
-            }
 
-            // Start a light-weight periodic loop as fallback (keeps previous behavior)
-            _autoReadyTask = Task.Run(async () =>
-            {
-                UAClient.Common.Log.Info($"EnableAutoReadyAsync: starting auto-ready loop (interval={checkInterval}) for module '{Name}'");
-                while (!ct.IsCancellationRequested)
+                // 1. Subscribe to Lock state
+                if (Lock != null)
                 {
                     try
                     {
-                        try { await EvaluateReadyAsync(); } catch (Exception ex) { UAClient.Common.Log.Debug($"EnableAutoReadyAsync: EvaluateReadyAsync failed: {ex.Message}"); }
-                        if (!IsReady)
+                        if (Lock.CurrentState != null)
                         {
-                            // attempt to make ready if not already in progress
-                            if (System.Threading.Interlocked.CompareExchange(ref _makeReadyInProgress, 1, 0) == 0)
-                            {
-                                try
-                                {
-                                    UAClient.Common.Log.Info($"AutoReady: periodic MakeReadyAsync triggered for module '{Name}'");
-                                    await MakeReadyAsync(TimeSpan.FromSeconds(30));
-                                    await EvaluateReadyAsync();
-                                }
-                                catch (Exception ex) { UAClient.Common.Log.Warn($"AutoReady: periodic MakeReadyAsync failed: {ex.Message}"); }
-                                finally { System.Threading.Interlocked.Exchange(ref _makeReadyInProgress, 0); }
-                            }
+                            UAClient.Common.Log.Info($"RemoteModule '{Name}': Subscribing to Lock.CurrentState for auto-recovery");
+                            var mi = await subMgr.AddMonitoredItemAsync(Lock.CurrentState.NodeId, 
+                                (m, e) => { _ = Task.Run(async () => await OnRecoveryLockChangedAsync()); });
+                            lock (_autoRecoveryMonitoredItems) { _autoRecoveryMonitoredItems.Add(mi); }
+                        }
+                        else if (Lock.Variables.TryGetValue("Locked", out var lockedVar))
+                        {
+                            UAClient.Common.Log.Info($"RemoteModule '{Name}': Subscribing to Lock.Locked for auto-recovery");
+                            var mi = await subMgr.AddMonitoredItemAsync(lockedVar.NodeId, 
+                                (m, e) => { _ = Task.Run(async () => await OnRecoveryLockChangedAsync()); });
+                            lock (_autoRecoveryMonitoredItems) { _autoRecoveryMonitoredItems.Add(mi); }
+                        }
+
+                        // Also subscribe to LockingClient to detect ownership changes
+                        if (Lock.LockingClient != null)
+                        {
+                            UAClient.Common.Log.Info($"RemoteModule '{Name}': Subscribing to Lock.LockingClient for auto-recovery");
+                            var mi2 = await subMgr.AddMonitoredItemAsync(Lock.LockingClient.NodeId, 
+                                (m, e) => { _ = Task.Run(async () => await OnRecoveryLockChangedAsync()); });
+                            lock (_autoRecoveryMonitoredItems) { _autoRecoveryMonitoredItems.Add(mi2); }
                         }
                     }
-                    catch (OperationCanceledException) { break; }
-                    catch (Exception ex) { UAClient.Common.Log.Debug($"AutoReady: unexpected error: {ex.Message}"); }
-
-                    try { await Task.Delay(checkInterval.Value, ct); } catch (OperationCanceledException) { break; }
+                    catch (Exception ex)
+                    {
+                        UAClient.Common.Log.Warn($"RemoteModule '{Name}': Failed to subscribe to Lock state: {ex.Message}");
+                    }
                 }
-                UAClient.Common.Log.Info($"EnableAutoReadyAsync: auto-ready loop stopped for module '{Name}'");
-            }, ct);
 
-            return Task.CompletedTask;
+                // 2. Subscribe to StartupSkill state
+                try
+                {
+                    var startupSkill = Methods.Values
+                        .OfType<RemoteSkill>()
+                        .FirstOrDefault(s => s.Name.IndexOf("Startup", StringComparison.OrdinalIgnoreCase) >= 0);
+
+                    if (startupSkill != null)
+                    {
+                        // Ensure StartupSkill has subscriptions set up
+                        try { await startupSkill.SetupSubscriptionsAsync(subMgr, true); } catch { }
+                        
+                        if (startupSkill.CurrentStateNode != null)
+                        {
+                            UAClient.Common.Log.Info($"RemoteModule '{Name}': Subscribing to StartupSkill.CurrentState for auto-recovery");
+                            var mi = await subMgr.AddMonitoredItemAsync(startupSkill.CurrentStateNode, 
+                                (m, e) => { _ = Task.Run(async () => await OnRecoveryStartupChangedAsync()); });
+                            lock (_autoRecoveryMonitoredItems) { _autoRecoveryMonitoredItems.Add(mi); }
+                        }
+                        else
+                        {
+                            UAClient.Common.Log.Warn($"RemoteModule '{Name}': StartupSkill.CurrentStateNode is null, cannot subscribe for auto-recovery");
+                        }
+                    }
+                    else
+                    {
+                        UAClient.Common.Log.Info($"RemoteModule '{Name}': No StartupSkill found, skipping startup state subscription");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    UAClient.Common.Log.Warn($"RemoteModule '{Name}': Failed to subscribe to StartupSkill state: {ex.Message}");
+                }
+
+                UAClient.Common.Log.Info($"RemoteModule '{Name}': Auto-recovery enabled with {_autoRecoveryMonitoredItems.Count} subscriptions");
+            }
+            catch (Exception ex)
+            {
+                UAClient.Common.Log.Error($"RemoteModule '{Name}': Failed to enable auto-recovery: {ex.Message}");
+            }
         }
 
-        public async Task DisableAutoReadyAsync()
+        public async Task DisableAutoRecoveryAsync()
         {
-            _autoReadyEnabled = false;
+            _autoRecoveryEnabled = false;
             try
             {
-                if (_autoReadyCts != null)
-                {
-                    try { _autoReadyCts.Cancel(); } catch { }
-                    try { if (_autoReadyTask != null) await _autoReadyTask; } catch { }
-                    try { _autoReadyCts.Dispose(); } catch { }
-                    _autoReadyCts = null;
-                    _autoReadyTask = null;
-                }
-                // remove monitored items created for auto-ready
                 var subMgr = _remoteServer?.SubscriptionManager;
                 if (subMgr != null)
                 {
-                    lock (_autoReadyMonitoredItems)
+                    lock (_autoRecoveryMonitoredItems)
                     {
-                        foreach (var mi in _autoReadyMonitoredItems)
+                        foreach (var mi in _autoRecoveryMonitoredItems)
                         {
                             try { _ = subMgr.RemoveMonitoredItemAsync(mi); } catch { }
                         }
-                        _autoReadyMonitoredItems.Clear();
+                        _autoRecoveryMonitoredItems.Clear();
                     }
                 }
-             }
-             catch (Exception ex) { UAClient.Common.Log.Debug($"DisableAutoReadyAsync: failed: {ex.Message}"); }
-         }
+                UAClient.Common.Log.Info($"RemoteModule '{Name}': Auto-recovery disabled");
+            }
+            catch (Exception ex)
+            {
+                UAClient.Common.Log.Debug($"RemoteModule '{Name}': DisableAutoRecoveryAsync failed: {ex.Message}");
+            }
+        }
 
-        private async Task OnAutoReadyLockChangedAsync()
+        private async Task OnRecoveryLockChangedAsync()
         {
             try
             {
-                var session = _client?.Session ?? throw new InvalidOperationException("No session");
-                if (Lock == null) return;
-                UAClient.Common.Log.Debug($"OnAutoReadyLockChangedAsync: triggered, checking lock state");
+                if (!_autoRecoveryEnabled) return;
+
+                var session = _client?.Session;
+                if (session == null || Lock == null) return;
+
+                UAClient.Common.Log.Debug($"RemoteModule '{Name}': OnRecoveryLockChanged - checking lock state");
+
                 var locked = await Lock.IsLockedAsync(session);
-                UAClient.Common.Log.Debug($"OnAutoReadyLockChangedAsync: IsLocked={locked}");
+                UAClient.Common.Log.Debug($"RemoteModule '{Name}': Lock state = {locked}");
+
+                // If lock is lost, trigger recovery
                 if (locked.HasValue && !locked.Value)
                 {
-                    // unlocked -> attempt MakeReady if not already running
-                    if (System.Threading.Interlocked.CompareExchange(ref _makeReadyInProgress, 1, 0) == 0)
+                    UAClient.Common.Log.Warn($"RemoteModule '{Name}': 🔓 Lock lost detected! Triggering recovery...");
+                    await TriggerRecoveryAsync("Lock lost");
+                }
+                else if (locked.HasValue && locked.Value)
+                {
+                    // Lock is present - check if WE are the owner
+                    try
                     {
-                        try
+                        var owner = await Lock.GetLockOwnerAsync(session);
+                        var ourId = _client?.Configuration?.ApplicationName ?? string.Empty;
+                        var ourHostname = System.Net.Dns.GetHostName();
+
+                        if (!string.IsNullOrEmpty(owner))
                         {
-                            UAClient.Common.Log.Info($"OnAutoReadyLockChangedAsync: lock freed, attempting MakeReadyAsync for module '{Name}'");
-                            await MakeReadyAsync(TimeSpan.FromSeconds(30));
-                            await EvaluateReadyAsync();
-                            UAClient.Common.Log.Info($"OnAutoReadyLockChangedAsync: MakeReadyAsync finished, IsReady={IsReady}");
+                            owner = owner.Trim('\'', '"', ' ');
+                            
+                            bool isOurs = (!string.IsNullOrEmpty(ourId) && owner.IndexOf(ourId, StringComparison.OrdinalIgnoreCase) >= 0) ||
+                                         (!string.IsNullOrEmpty(ourHostname) && owner.IndexOf(ourHostname, StringComparison.OrdinalIgnoreCase) >= 0);
+
+                            if (!isOurs)
+                            {
+                                UAClient.Common.Log.Warn($"RemoteModule '{Name}': 🔒 Lock stolen by '{owner}'! Triggering recovery...");
+                                await TriggerRecoveryAsync($"Lock stolen by {owner}");
+                            }
+                            else
+                            {
+                                UAClient.Common.Log.Debug($"RemoteModule '{Name}': Lock is ours (owner={owner})");
+                                IsLockedByUs = true;
+                            }
                         }
-                        catch (Exception ex) { UAClient.Common.Log.Warn($"OnAutoReadyLockChangedAsync: MakeReadyAsync failed: {ex.Message}"); }
-                        finally { System.Threading.Interlocked.Exchange(ref _makeReadyInProgress, 0); }
+                    }
+                    catch (Exception ex)
+                    {
+                        UAClient.Common.Log.Debug($"RemoteModule '{Name}': Failed to check lock owner: {ex.Message}");
                     }
                 }
             }
             catch (Exception ex)
             {
-                UAClient.Common.Log.Debug($"OnAutoReadyLockChangedAsync: error: {ex.Message}");
+                UAClient.Common.Log.Error($"RemoteModule '{Name}': OnRecoveryLockChanged error: {ex.Message}");
+            }
+        }
+
+        private async Task OnRecoveryStartupChangedAsync()
+        {
+            try
+            {
+                if (!_autoRecoveryEnabled) return;
+
+                var startupSkill = Methods.Values
+                    .OfType<RemoteSkill>()
+                    .FirstOrDefault(s => s.Name.IndexOf("Startup", StringComparison.OrdinalIgnoreCase) >= 0);
+
+                if (startupSkill == null) return;
+
+                UAClient.Common.Log.Debug($"RemoteModule '{Name}': OnRecoveryStartupChanged - checking startup state");
+
+                var state = await startupSkill.GetStateAsync();
+                UAClient.Common.Log.Debug($"RemoteModule '{Name}': StartupSkill state = {state}");
+
+                // If StartupSkill is Halted (should be Running), trigger recovery
+                if (state.HasValue && state.Value == (int)UAClient.Common.SkillStates.Halted)
+                {
+                    UAClient.Common.Log.Warn($"RemoteModule '{Name}': ⛔ StartupSkill halted! Triggering recovery...");
+                    await TriggerRecoveryAsync("StartupSkill halted");
+                }
+                else if (state.HasValue && state.Value == (int)UAClient.Common.SkillStates.Running)
+                {
+                    UAClient.Common.Log.Debug($"RemoteModule '{Name}': StartupSkill is running");
+                }
+            }
+            catch (Exception ex)
+            {
+                UAClient.Common.Log.Error($"RemoteModule '{Name}': OnRecoveryStartupChanged error: {ex.Message}");
+            }
+        }
+
+        private async Task TriggerRecoveryAsync(string reason)
+        {
+            // Use atomic flag to prevent multiple concurrent recoveries
+            if (System.Threading.Interlocked.CompareExchange(ref _recoveryInProgress, 1, 0) != 0)
+            {
+                UAClient.Common.Log.Debug($"RemoteModule '{Name}': Recovery already in progress, skipping");
+                return;
+            }
+
+            try
+            {
+                UAClient.Common.Log.Warn($"RemoteModule '{Name}': 🔄 Starting recovery - Reason: {reason}");
+
+                var session = _client?.Session;
+                if (session == null)
+                {
+                    UAClient.Common.Log.Error($"RemoteModule '{Name}': Cannot recover - no session");
+                    return;
+                }
+
+                // Step 1: Re-lock module FIRST (MUST have lock before manipulating skills!)
+                UAClient.Common.Log.Info($"RemoteModule '{Name}': Recovery Step 1/3 - Re-locking module...");
+                try
+                {
+                    var lockResult = await LockAsync(session);
+                    if (lockResult == true)
+                    {
+                        UAClient.Common.Log.Info($"RemoteModule '{Name}': ✓ Module re-locked");
+                    }
+                    else
+                    {
+                        UAClient.Common.Log.Error($"RemoteModule '{Name}': ❌ Failed to re-lock module, aborting recovery");
+                        return;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    UAClient.Common.Log.Error($"RemoteModule '{Name}': Error re-locking: {ex.Message}");
+                    return;
+                }
+
+                // Step 2: NOW we can halt all skills (we have the lock!)
+                UAClient.Common.Log.Info($"RemoteModule '{Name}': Recovery Step 2/3 - Halting all skills...");
+                try
+                {
+                    var skills = Methods.Values.OfType<RemoteSkill>().ToList();
+                    var haltTasks = new List<Task>();
+
+                    foreach (var skill in skills)
+                    {
+                        if (skill.CurrentState != UAClient.Common.SkillStates.Halted)
+                        {
+                            UAClient.Common.Log.Debug($"RemoteModule '{Name}': Halting skill '{skill.Name}'");
+                            haltTasks.Add(Task.Run(async () =>
+                            {
+                                try { await skill.HaltAsync(); }
+                                catch (Exception ex) { UAClient.Common.Log.Debug($"Halt '{skill.Name}' failed: {ex.Message}"); }
+                            }));
+                        }
+                    }
+
+                    if (haltTasks.Count > 0)
+                    {
+                        await Task.WhenAll(haltTasks);
+                        // Wait for skills to reach Halted state
+                        await Task.Delay(2000);
+                    }
+
+                    UAClient.Common.Log.Info($"RemoteModule '{Name}': ✓ All skills halted");
+                }
+                catch (Exception ex)
+                {
+                    UAClient.Common.Log.Warn($"RemoteModule '{Name}': Error halting skills: {ex.Message}");
+                }
+
+                // Step 3: Restart StartupSkill
+                UAClient.Common.Log.Info($"RemoteModule '{Name}': Recovery Step 3/3 - Restarting StartupSkill...");
+                try
+                {
+                    await StartAsync(reset: true, timeout: TimeSpan.FromSeconds(30), couple: false);
+                    UAClient.Common.Log.Info($"RemoteModule '{Name}': ✓ StartupSkill restarted");
+                }
+                catch (Exception ex)
+                {
+                    UAClient.Common.Log.Error($"RemoteModule '{Name}': Error restarting startup: {ex.Message}");
+                    return;
+                }
+
+                UAClient.Common.Log.Warn($"RemoteModule '{Name}': ✅ Recovery completed successfully!");
+            }
+            catch (Exception ex)
+            {
+                UAClient.Common.Log.Error($"RemoteModule '{Name}': Recovery failed: {ex.Message}");
+            }
+            finally
+            {
+                System.Threading.Interlocked.Exchange(ref _recoveryInProgress, 0);
             }
         }
     }
