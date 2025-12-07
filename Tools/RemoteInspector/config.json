@@ -1,0 +1,5 @@
+{
+  "Endpoint": "opc.tcp://172.24.100.85:4892",
+  "Username": "orchestrator",
+  "Password": "orchestrator"
+}

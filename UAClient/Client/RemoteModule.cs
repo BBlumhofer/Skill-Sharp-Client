@@ -19,8 +19,15 @@ namespace UAClient.Client
         public RemoteLock? Lock { get; private set; }
         
         public bool IsLockedByUs { get { lock (this) { return _isLockedByUs; } } private set { lock (this) { _isLockedByUs = value; } }}
-    private bool _isLockedByUs = false;
+        private bool _isLockedByUs = false;
         public IDictionary<string, RemotePort> Ports { get; } = new Dictionary<string, RemotePort>();
+        public List<string> Neighbors{get; private set;} = new List<string>();
+        /// <summary>
+        /// Liefert ein Mapping von Port-Name auf Partner-RFID-Tag für alle Ports dieses Moduls,
+        /// aber nur für Ports, deren `Closed`-Eigenschaft true ist. Leere oder null-Tags werden
+        /// nicht in das Ergebnis aufgenommen.
+        /// </summary>
+
         public IDictionary<string, RemoteStorage> Storages { get; } = new Dictionary<string, RemoteStorage>();
         public IDictionary<string, RemoteComponent> Components { get; } = new Dictionary<string, RemoteComponent>(StringComparer.OrdinalIgnoreCase);
         public IDictionary<string, RemoteSkill> SkillSet { get; } = new Dictionary<string, RemoteSkill>(StringComparer.OrdinalIgnoreCase);
@@ -48,6 +55,31 @@ namespace UAClient.Client
         // Enable auto-relock: re-lock module when it becomes unlocked. Uses RemoteServer.SubscriptionManager when available.
         private bool _autoRelockEnabled = false;
         private readonly List<MonitoredItem> _autoRelockMonitoredItems = new List<MonitoredItem>();
+
+        public IDictionary<string, string> GetClosedPortsPartnerRfidTags()
+        {
+            var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                foreach (var kv in Ports)
+                {
+                    try
+                    {
+                        var portName = kv.Key;
+                        var port = kv.Value;
+                        if (port == null) continue;
+                        if (!port.Closed) continue;
+                        var tag = port.PartnerRfidTag;
+                        if (!string.IsNullOrEmpty(tag)) map[portName] = tag!;
+                    }
+                    catch { /* ignore per-port errors */ }
+                }
+            }
+            catch { }
+            return map;
+        }
+
+
         public async Task EnableAutoRelockAsync()
         {
             if (_autoRelockEnabled) return;
@@ -231,6 +263,105 @@ namespace UAClient.Client
             }
             catch { }
             return null;
+        }
+
+        // Debug helper: recursively browse a node and log its children (limited depth).
+        // Enhanced to read DisplayName and Variable values when available for better debugging.
+        private async System.Threading.Tasks.Task BrowseAndLogNodeRecursive(Session session, NodeId nodeId, int depth, int maxDepth)
+        {
+            try
+            {
+                if (nodeId == null || nodeId.Equals(NodeId.Null)) return;
+                var indent = new string(' ', depth * 2);
+
+                // Read BrowseName and DisplayName attributes
+                string bname = "(unknown)";
+                string display = "(unknown)";
+                try
+                {
+                    bname = await GetBrowseNameAsync(session, nodeId) ?? "(null)";
+                }
+                catch { }
+                try
+                {
+                    var readDisplay = new ReadValueIdCollection { new ReadValueId { NodeId = nodeId, AttributeId = Attributes.DisplayName } };
+                    DataValueCollection results;
+                    DiagnosticInfoCollection diag;
+                    session.Read(null, 0, TimestampsToReturn.Neither, readDisplay, out results, out diag);
+                    if (results != null && results.Count > 0 && results[0].Value != null)
+                    {
+                        var dn = results[0].Value as LocalizedText;
+                        display = dn?.Text ?? dn?.ToString() ?? "(null)";
+                    }
+                }
+                catch { }
+
+                UAClient.Common.Log.Debug($"{indent}BrowseNode: NodeId={nodeId} BrowseName={bname} DisplayName={display}");
+
+                if (depth >= maxDepth) return;
+
+                // Browse children (hierarchical)
+                try
+                {
+                    var browser = new Browser(session)
+                    {
+                        BrowseDirection = BrowseDirection.Forward,
+                        ReferenceTypeId = ReferenceTypeIds.HierarchicalReferences,
+                        IncludeSubtypes = true,
+                        NodeClassMask = (int)(NodeClass.Object | NodeClass.Variable | NodeClass.Method)
+                    };
+                    var refs = await browser.BrowseAsync(nodeId);
+                    if (refs != null)
+                    {
+                        foreach (var r in refs)
+                        {
+                            try
+                            {
+                                var expanded = r.NodeId as ExpandedNodeId ?? new ExpandedNodeId(r.NodeId);
+                                var childId = UaHelpers.ToNodeId(expanded, session);
+                                var childDisplay = r.DisplayName?.Text ?? "";
+                                var childBrowse = r.BrowseName?.Name ?? "";
+                                var childClass = r.NodeClass.ToString();
+                                UAClient.Common.Log.Debug($"{indent}- Child: BrowseName={childBrowse} DisplayName={childDisplay} NodeClass={childClass} NodeId={childId}");
+
+                                // If it's a variable, try to read its value for debugging
+                                if (childId != null && !childId.Equals(NodeId.Null) && r.NodeClass == NodeClass.Variable)
+                                {
+                                    try
+                                    {
+                                        var dv = await session.ReadValueAsync(childId, System.Threading.CancellationToken.None);
+                                        var val = dv?.Value?.ToString() ?? "(null)";
+                                        var datatype = dv?.Value != null ? dv.Value.GetType().ToString() : "(unknown)";
+                                        UAClient.Common.Log.Debug($"{indent}  (Variable) Value={val} DataType={datatype}");
+                                    }
+                                    catch (Exception exVal)
+                                    {
+                                        UAClient.Common.Log.Debug($"{indent}  (Variable) read failed: {exVal.Message}");
+                                    }
+                                }
+
+                                if (childId != null && !childId.Equals(NodeId.Null))
+                                {
+                                    // Recurse
+                                    await BrowseAndLogNodeRecursive(session, childId, depth + 1, maxDepth);
+                                }
+                            }
+                            catch (Exception exChild)
+                            {
+                                UAClient.Common.Log.Debug($"{indent}- Child browse failed: {exChild.Message}");
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    UAClient.Common.Log.Debug($"{indent}BrowseAsync failed for {nodeId}: {ex.Message}");
+                }
+            }
+            catch (Exception ex)
+            {
+                UAClient.Common.Log.Debug($"BrowseAndLogNodeRecursive error for {nodeId}: {ex.Message}");
+            }
         }
 
         private async System.Threading.Tasks.Task<object?> CreateRemoteObjectFromTypeDefinitionAsync(Session session, NodeId nodeId, string name)
@@ -899,6 +1030,204 @@ namespace UAClient.Client
             catch (Exception ex)
             {
                 UAClient.Common.Log.Warn($"SetupSubscriptionsAsync: failed to subscribe monitoring variables: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Attempt to resolve Resource NodeIds for carrier/product type references found in storage slots.
+        /// This resolves values like ExpandedNodeId, NodeId strings or dotted browse paths
+        /// such as "CA-Module.Resources.Cab_A_Blue.Identification.ComponentName" to a NodeId
+        /// using the server-side TranslateBrowsePaths service and caches results via SessionBrowseCache.
+        /// </summary>
+        public async Task ResolveResourceNodeIdsAsync()
+        {
+            try
+            {
+                var session = _client?.Session;
+                if (session == null) return;
+
+                foreach (var storKv in Storages)
+                {
+                    var storage = storKv.Value;
+                    if (storage == null) continue;
+                    foreach (var slotKv in storage.Slots)
+                    {
+                        var slot = slotKv.Value;
+                        if (slot == null) continue;
+                        try
+                        {
+                            // Helper local: attempt to resolve a string dotted path by trying several start nodes
+                            async System.Threading.Tasks.Task<NodeId?> TryResolveDottedPathAsync(string dotted)
+                            {
+                                if (string.IsNullOrEmpty(dotted)) return null;
+                                var parts = dotted.Split('.');
+                                // Try a set of start nodes: slot, storage, module base, Objects folder
+                                var starts = new NodeId?[] { slot.BaseNodeId, storage.BaseNodeId, BaseNodeId, ObjectIds.ObjectsFolder };
+                                foreach (var start in starts)
+                                {
+                                    try
+                                    {
+                                        UAClient.Common.Log.Debug($"ResolveResourceNodeIdsAsync: trying TranslatePath from {start} for path '{dotted}'");
+                                        var resolved = await SessionBrowseCache.TranslatePathAsync(session, start, parts);
+                                        if (resolved != null)
+                                        {
+                                            UAClient.Common.Log.Debug($"ResolveResourceNodeIdsAsync: TranslatePath succeeded from {start} -> {resolved}");
+                                            return resolved;
+                                        }
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        UAClient.Common.Log.Debug($"ResolveResourceNodeIdsAsync: TranslatePath from {start} failed: {ex.Message}");
+                                    }
+                                }
+                                return null;
+                            }
+
+                            // Resolve CarrierType
+                            try
+                            {
+                                object? cv = null;
+                                if (slot.Variables.TryGetValue("CarrierType", out var carrierVar)) cv = carrierVar?.Value;
+                                UAClient.Common.Log.Debug($"ResolveResourceNodeIdsAsync: slot='{slot.Name}' CarrierType raw='{cv?.ToString() ?? "(null)"}' (type={cv?.GetType().Name ?? "null"})");
+
+                                if (cv is NodeId nid)
+                                {
+                                    slot.ResolvedCarrierTypeNodeId = nid;
+                                    UAClient.Common.Log.Debug($"ResolveResourceNodeIdsAsync: CarrierType is NodeId -> {nid}");
+                                }
+                                else if (cv is ExpandedNodeId exp)
+                                {
+                                    try
+                                    {
+                                        var to = UaHelpers.ToNodeId(exp, session);
+                                        slot.ResolvedCarrierTypeNodeId = to;
+                                        UAClient.Common.Log.Debug($"ResolveResourceNodeIdsAsync: CarrierType ExpandedNodeId -> {to}");
+                                    }
+                                    catch (Exception ex) { UAClient.Common.Log.Debug($"ResolveResourceNodeIdsAsync: ToNodeId(exp) failed: {ex.Message}"); }
+                                }
+                                else if (cv is string s && !string.IsNullOrEmpty(s))
+                                {
+                                    NodeId? resolved = null;
+                                    try { resolved = new NodeId(s); UAClient.Common.Log.Debug($"ResolveResourceNodeIdsAsync: parsed CarrierType string as NodeId -> {resolved}"); } catch { resolved = null; }
+                                    if (resolved == null && s.Contains('.'))
+                                    {
+                                        resolved = await TryResolveDottedPathAsync(s);
+                                    }
+                                    if (resolved != null)
+                                    {
+                                        slot.ResolvedCarrierTypeNodeId = resolved;
+                                    }
+                                    else
+                                    {
+                                        UAClient.Common.Log.Debug($"ResolveResourceNodeIdsAsync: CarrierType string '{s}' could not be resolved to NodeId");
+                                    }
+                                }
+
+                                // If we have a resolved NodeId for the carrier type, attempt to read Identification.ComponentName for a human-friendly name
+                                if (slot.ResolvedCarrierTypeNodeId != null && !slot.ResolvedCarrierTypeNodeId.Equals(NodeId.Null))
+                                {
+                                    try
+                                    {
+                                        // Always use DisplayName as requested
+                                        var readDisplay = new ReadValueIdCollection { new ReadValueId { NodeId = slot.ResolvedCarrierTypeNodeId, AttributeId = Attributes.DisplayName } };
+                                        DataValueCollection resultsDisp;
+                                        DiagnosticInfoCollection diagDisp;
+                                        session.Read(null, 0, TimestampsToReturn.Neither, readDisplay, out resultsDisp, out diagDisp);
+                                        if (resultsDisp != null && resultsDisp.Count > 0 && resultsDisp[0].Value != null)
+                                        {
+                                            var dn = resultsDisp[0].Value as LocalizedText;
+                                            slot.ResolvedCarrierTypeName = dn?.Text ?? dn?.ToString() ?? slot.ResolvedCarrierTypeNodeId.ToString();
+                                            UAClient.Common.Log.Debug($"ResolveResourceNodeIdsAsync: used DisplayName='{slot.ResolvedCarrierTypeName}' for {slot.ResolvedCarrierTypeNodeId}");
+                                        }
+                                        else
+                                        {
+                                            // Fallback to NodeId string
+                                            slot.ResolvedCarrierTypeName = slot.ResolvedCarrierTypeNodeId.ToString();
+                                            UAClient.Common.Log.Debug($"ResolveResourceNodeIdsAsync: DisplayName empty, using NodeId='{slot.ResolvedCarrierTypeName}'");
+                                        }
+                                    }
+                                    catch (Exception ex) { UAClient.Common.Log.Debug($"ResolveResourceNodeIdsAsync: read DisplayName failed: {ex.Message}"); slot.ResolvedCarrierTypeName = slot.ResolvedCarrierTypeNodeId.ToString(); }
+                                }
+                            }
+                            catch (Exception ex) { UAClient.Common.Log.Debug($"ResolveResourceNodeIdsAsync: CarrierType resolve error: {ex.Message}"); }
+
+                            // Resolve ProductType (same strategy)
+                            try
+                            {
+                                object? pv = null;
+                                if (slot.Variables.TryGetValue("ProductType", out var productVar)) pv = productVar?.Value;
+                                UAClient.Common.Log.Debug($"ResolveResourceNodeIdsAsync: slot='{slot.Name}' ProductType raw='{pv?.ToString() ?? "(null)"}' (type={pv?.GetType().Name ?? "null"})");
+
+                                if (pv is NodeId pnid)
+                                {
+                                    slot.ResolvedProductTypeNodeId = pnid;
+                                    UAClient.Common.Log.Debug($"ResolveResourceNodeIdsAsync: ProductType is NodeId -> {pnid}");
+                                }
+                                else if (pv is ExpandedNodeId pexp)
+                                {
+                                    try
+                                    {
+                                        var to2 = UaHelpers.ToNodeId(pexp, session);
+                                        slot.ResolvedProductTypeNodeId = to2;
+                                        UAClient.Common.Log.Debug($"ResolveResourceNodeIdsAsync: ProductType ExpandedNodeId -> {to2}");
+                                    }
+                                    catch (Exception ex) { UAClient.Common.Log.Debug($"ResolveResourceNodeIdsAsync: ToNodeId(Expanded) failed: {ex.Message}"); }
+                                }
+                                else if (pv is string ps && !string.IsNullOrEmpty(ps))
+                                {
+                                    NodeId? presolved = null;
+                                    try { presolved = new NodeId(ps); UAClient.Common.Log.Debug($"ResolveResourceNodeIdsAsync: parsed ProductType string as NodeId -> {presolved}"); } catch { presolved = null; }
+                                    if (presolved == null && ps.Contains('.'))
+                                    {
+                                        presolved = await TryResolveDottedPathAsync(ps);
+                                    }
+                                    if (presolved != null)
+                                    {
+                                        slot.ResolvedProductTypeNodeId = presolved;
+                                    }
+                                    else
+                                    {
+                                        UAClient.Common.Log.Debug($"ResolveResourceNodeIdsAsync: ProductType string '{ps}' could not be resolved to NodeId");
+                                    }
+                                }
+
+                                if (slot.ResolvedProductTypeNodeId != null && !slot.ResolvedProductTypeNodeId.Equals(NodeId.Null))
+                                {
+                                    try
+                                    {
+                                        // Always use DisplayName as requested
+                                        var readDisplay2 = new ReadValueIdCollection { new ReadValueId { NodeId = slot.ResolvedProductTypeNodeId, AttributeId = Attributes.DisplayName } };
+                                        DataValueCollection resultsDisp2;
+                                        DiagnosticInfoCollection diagDisp2;
+                                        session.Read(null, 0, TimestampsToReturn.Neither, readDisplay2, out resultsDisp2, out diagDisp2);
+                                        if (resultsDisp2 != null && resultsDisp2.Count > 0 && resultsDisp2[0].Value != null)
+                                        {
+                                            var dn2 = resultsDisp2[0].Value as LocalizedText;
+                                            slot.ResolvedProductTypeName = dn2?.Text ?? dn2?.ToString() ?? slot.ResolvedProductTypeNodeId.ToString();
+                                            UAClient.Common.Log.Debug($"ResolveResourceNodeIdsAsync: used DisplayName='{slot.ResolvedProductTypeName}' for {slot.ResolvedProductTypeNodeId}");
+                                        }
+                                        else
+                                        {
+                                            // Fallback to NodeId string
+                                            slot.ResolvedProductTypeName = slot.ResolvedProductTypeNodeId.ToString();
+                                            UAClient.Common.Log.Debug($"ResolveResourceNodeIdsAsync: DisplayName empty, using NodeId='{slot.ResolvedProductTypeName}'");
+                                        }
+                                    }
+                                    catch (Exception ex) { UAClient.Common.Log.Debug($"ResolveResourceNodeIdsAsync: read DisplayName failed: {ex.Message}"); slot.ResolvedProductTypeName = slot.ResolvedProductTypeNodeId.ToString(); }
+                                }
+                            }
+                            catch (Exception ex) { UAClient.Common.Log.Debug($"ResolveResourceNodeIdsAsync: ProductType resolve error: {ex.Message}"); }
+                        }
+                        catch (Exception ex)
+                        {
+                            UAClient.Common.Log.Debug($"ResolveResourceNodeIdsAsync: slot '{slot?.Name}' handling failed: {ex.Message}");
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                UAClient.Common.Log.Debug($"ResolveResourceNodeIdsAsync: failed: {ex.Message}");
             }
         }
 

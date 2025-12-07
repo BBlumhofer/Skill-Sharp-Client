@@ -89,6 +89,30 @@ namespace UAClient.Client
             }
         }
 
+        // Resolved NodeIds for carrier/product types (populated by RemoteModule.ResolveResourceNodeIdsAsync)
+        public NodeId? ResolvedCarrierTypeNodeId { get; set; }
+        public NodeId? ResolvedProductTypeNodeId { get; set; }
+
+        // Optional human-friendly names resolved from the referenced resource objects
+        public string? ResolvedCarrierTypeName { get; set; }
+        public string? ResolvedProductTypeName { get; set; }
+
+        public string CarrierTypeDisplay()
+        {
+            if (!string.IsNullOrEmpty(ResolvedCarrierTypeName)) return ResolvedCarrierTypeName!;
+            if (ResolvedCarrierTypeNodeId != null && !ResolvedCarrierTypeNodeId.Equals(NodeId.Null)) return ResolvedCarrierTypeNodeId.ToString();
+            var ct = CarrierType;
+            return ct?.ToString() ?? "(null)";
+        }
+
+        public string ProductTypeDisplay()
+        {
+            if (!string.IsNullOrEmpty(ResolvedProductTypeName)) return ResolvedProductTypeName!;
+            if (ResolvedProductTypeNodeId != null && !ResolvedProductTypeNodeId.Equals(NodeId.Null)) return ResolvedProductTypeNodeId.ToString();
+            var pt = ProductType;
+            return pt?.ToString() ?? "(null)";
+        }
+
         // Raw state value (may be string or numeric)
         public object? State
         {

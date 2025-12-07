@@ -172,9 +172,57 @@ namespace UAClient.Client
                     var expandedChild = child.NodeId as ExpandedNodeId ?? new ExpandedNodeId(child.NodeId);
                     var childNodeId = UaHelpers.ToNodeId(expandedChild, session);
                     var name = child.DisplayName.Text ?? childNodeId.ToString();
-                    UAClient.Common.Log.Info($"Found module candidate: {name} (node={childNodeId})");
-                    var module = new RemoteModule(name, childNodeId, _client, this);
-                    _modules[name] = module;
+
+                    // Only treat nodes with HasTypeDefinition = MachineType as modules
+                    RemoteModule? module = null;
+                    try
+                    {
+                        // Browse HasTypeDefinition of the child
+                        var typeBrowser = new Browser(session)
+                        {
+                            BrowseDirection = BrowseDirection.Forward,
+                            ReferenceTypeId = ReferenceTypeIds.HasTypeDefinition,
+                            IncludeSubtypes = true,
+                            NodeClassMask = 0
+                        };
+                        ReferenceDescriptionCollection typeRefs = await typeBrowser.BrowseAsync(childNodeId);
+                        if (typeRefs == null || typeRefs.Count == 0)
+                        {
+                            UAClient.Common.Log.Debug($"Skipping candidate '{name}' - no TypeDefinition found (node={childNodeId})");
+                            continue;
+                        }
+                        var expandedType = typeRefs[0].NodeId as ExpandedNodeId ?? new ExpandedNodeId(typeRefs[0].NodeId);
+                        var typeNodeId = UaHelpers.ToNodeId(expandedType, session);
+
+                        // Read BrowseName of the type node
+                        var readValueIds = new ReadValueIdCollection { new ReadValueId { NodeId = typeNodeId, AttributeId = Attributes.BrowseName } };
+                        DataValueCollection results;
+                        DiagnosticInfoCollection diagnosticInfos;
+                        session.Read(null, 0, TimestampsToReturn.Neither, readValueIds, out results, out diagnosticInfos);
+                        string? typeBrowseName = null;
+                        if (results != null && results.Count > 0 && results[0].Value != null)
+                        {
+                            var qn = results[0].Value as QualifiedName;
+                            typeBrowseName = qn?.Name;
+                        }
+
+                        // Accept nodes whose TypeDefinition name explicitly equals 'MachineType'
+                        // but also accept types that contain the word 'Machine' (some servers use vendor-specific names)
+                        if (string.IsNullOrEmpty(typeBrowseName) || typeBrowseName.IndexOf("Machine", StringComparison.OrdinalIgnoreCase) < 0)
+                        {
+                            UAClient.Common.Log.Debug($"Skipping candidate '{name}' - TypeDefinition is '{typeBrowseName ?? "(unknown)"}'");
+                            continue;
+                        }
+
+                        UAClient.Common.Log.Info($"Found module candidate: {name} (node={childNodeId}) with TypeDefinition={typeBrowseName}");
+                        module = new RemoteModule(name, childNodeId, _client, this);
+                        _modules[name] = module;
+                    }
+                    catch (Exception ex)
+                    {
+                        UAClient.Common.Log.Warn($"Error inspecting candidate '{name}': {ex.Message}");
+                        continue;
+                    }
 
                     // start module setup in parallel, but limit number of concurrent setups
                     moduleTasks.Add(System.Threading.Tasks.Task.Run(async () =>
@@ -182,12 +230,14 @@ namespace UAClient.Client
                         await sem.WaitAsync();
                         try
                         {
-                            try
-                            {
-                                // During initial server browse, avoid creating subscriptions to speed up discovery.
-                                await module.SetupSubscriptionsAsync(_subscriptionManager, false);
-                                UAClient.Common.Log.Info($"Module '{name}' setup completed.");
-                            }
+                                try
+                                {
+                                    // During initial server browse, avoid creating subscriptions to speed up discovery.
+                                    await module.SetupSubscriptionsAsync(_subscriptionManager, false);
+                                    // Resolve resource NodeIds (CarrierType/ProductType) for slots so client can reference resources by NodeId
+                                    try { await module.ResolveResourceNodeIdsAsync(); } catch { }
+                                    UAClient.Common.Log.Info($"Module '{name}' setup completed.");
+                                }
                             catch (Exception ex)
                             {
                                 UAClient.Common.Log.Warn($"Module '{name}' setup failed: {ex.Message}");
