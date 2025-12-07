@@ -93,13 +93,13 @@ namespace UAClient.Client
                 // subscribe to lock state variable(s)
                 if (Lock != null && Lock.CurrentState != null)
                 {
-                    UAClient.Common.Log.Debug($"EnableAutoRelockAsync: subscribing to Lock.CurrentState node={Lock.CurrentState.NodeId}");
+                    // subscribe to Lock.CurrentState (quiet - avoid noisy debug output)
                     var mi = await subMgr.AddMonitoredItemAsync(Lock.CurrentState.NodeId, (m, e) => { _ = Task.Run(async () => await OnLockStateChangedAsync()); });
                     lock (_autoRelockMonitoredItems) { _autoRelockMonitoredItems.Add(mi); }
                 }
                 else if (Lock != null && Lock.Variables.TryGetValue("Locked", out var lockedVar))
                 {
-                    UAClient.Common.Log.Debug($"EnableAutoRelockAsync: subscribing to Lock.Locked node={lockedVar.NodeId}");
+                    // subscribe to Lock.Locked (quiet - avoid noisy debug output)
                     var mi = await subMgr.AddMonitoredItemAsync(lockedVar.NodeId, (m, e) => { _ = Task.Run(async () => await OnLockStateChangedAsync()); });
                     lock (_autoRelockMonitoredItems) { _autoRelockMonitoredItems.Add(mi); }
                 }
@@ -131,68 +131,67 @@ namespace UAClient.Client
                 }
                 catch (Exception ex) { UAClient.Common.Log.Debug($"EnableAutoRelockAsync: owner subscription failed: {ex.Message}"); }
 
-                UAClient.Common.Log.Info($"EnableAutoRelockAsync: auto-relock enabled, monitored items={_autoRelockMonitoredItems.Count}");
+                UAClient.Common.Log.Debug($"EnableAutoRelockAsync: auto-relock enabled, monitored items={_autoRelockMonitoredItems.Count}");
             }
             catch (Exception ex) { UAClient.Common.Log.Debug($"EnableAutoRelockAsync: failed to enable auto-relock: {ex.Message}"); }
         }
 
         private async Task OnLockStateChangedAsync()
         {
-            try
-            {
-                var session = _client?.Session ?? throw new InvalidOperationException("No session");
-                if (Lock == null) return;
+                try
+                {
+                    var session = _client?.Session ?? throw new InvalidOperationException("No session");
+                    if (Lock == null) return;
 
-                UAClient.Common.Log.Debug($"OnLockStateChangedAsync: triggered, reading locked state...");
-                var locked = await Lock.IsLockedAsync(session);
-                UAClient.Common.Log.Debug($"OnLockStateChangedAsync: IsLockedAsync returned={(locked.HasValue ? locked.Value.ToString() : "null")}");
+                    // Check lock state (minimal logging to avoid console spam)
+                    var locked = await Lock.IsLockedAsync(session);
 
                 // If locked, check owner. If owned by someone else, do not attempt relock.
                 if (locked.HasValue && locked.Value)
                 {
-                    try
-                    {
-                        var owner = await Lock.GetLockOwnerAsync(session);
-                        var ourId = _client?.Configuration?.ApplicationName ?? string.Empty;
-                        UAClient.Common.Log.Debug($"OnLockStateChangedAsync: lock owner='{owner}', ourId='{ourId}'");
+                        try
+                        {
+                            var owner = await Lock.GetLockOwnerAsync(session);
+                            var ourId = _client?.Configuration?.ApplicationName ?? string.Empty;
                         if (!string.IsNullOrEmpty(owner) && !string.IsNullOrEmpty(ourId))
                         {
                             // if owner contains our id, assume we hold the lock
                             if (owner.IndexOf(ourId, StringComparison.OrdinalIgnoreCase) >= 0)
                             {
-                                UAClient.Common.Log.Info($"RemoteModule '{Name}': lock is held by us (owner={owner})");
+                                UAClient.Common.Log.Debug($"RemoteModule '{Name}': lock is held by us (owner={owner})");
                                 // nothing to do
                                 await EvaluateReadyAsync();
                                 return;
                             }
                             else
                             {
-                                UAClient.Common.Log.Info($"RemoteModule '{Name}': lock is held by other client (owner={owner}), will not relock");
+                                UAClient.Common.Log.Debug($"RemoteModule '{Name}': lock is held by other client (owner={owner}), will not relock");
                                 await EvaluateReadyAsync();
                                 return;
                             }
                         }
                         // if owner unknown, just avoid aggressive relock when it's locked by anyone
-                        UAClient.Common.Log.Info($"RemoteModule '{Name}': lock is held (owner unknown), skipping relock");
+                        UAClient.Common.Log.Debug($"RemoteModule '{Name}': lock is held (owner unknown), skipping relock");
                         await EvaluateReadyAsync();
                         return;
                     }
-                    catch (Exception ex)
-                    {
-                        UAClient.Common.Log.Debug($"OnLockStateChangedAsync: failed to read owner: {ex.Message}");
-                        await EvaluateReadyAsync();
-                        return;
-                    }
+                        catch (Exception ex)
+                        {
+                            // reading owner failed - log at Warn level
+                            UAClient.Common.Log.Warn($"OnLockStateChangedAsync: failed to read owner: {ex.Message}");
+                            await EvaluateReadyAsync();
+                            return;
+                        }
                 }
 
                 // not locked -> attempt relock (best-effort)
-                try
-                {
-                    UAClient.Common.Log.Info($"RemoteModule '{Name}': lock appears free, attempting relock");
-                    var before = DateTime.UtcNow;
-                    var relockResult = await LockAsync(session);
-                    UAClient.Common.Log.Debug($"OnLockStateChangedAsync: relock attempt finished result={relockResult} (duration={(DateTime.UtcNow - before).TotalMilliseconds}ms)");
-                }
+                    try
+                    {
+                        UAClient.Common.Log.Debug($"RemoteModule '{Name}': lock appears free, attempting relock");
+                        var before = DateTime.UtcNow;
+                        var relockResult = await LockAsync(session);
+                        // relock result processed; avoid verbose timing debug by default
+                    }
                 catch (Exception ex)
                 {
                     UAClient.Common.Log.Warn($"RemoteModule '{Name}': auto-relock attempt failed: {ex.Message}");
@@ -714,7 +713,7 @@ namespace UAClient.Client
                                 try
                                 {
                                     await RemoteVariableCollector.AddVariableNodesAsync(session, childId, _monitoring_nodes, Monitoring, false);
-                                    UAClient.Common.Log.Info($"RemoteModule '{Name}': added Monitoring variables from '{name}' ({Monitoring.Count} vars)");
+                                    UAClient.Common.Log.Debug($"RemoteModule '{Name}': added Monitoring variables from '{name}' ({Monitoring.Count} vars)");
                                 }
                                 catch { }
                                 return;
@@ -757,7 +756,7 @@ namespace UAClient.Client
                                                                 Components[compName] = port;
                                                             }
                                                             catch { }
-                                                            UAClient.Common.Log.Info($"RemoteModule '{Name}': added Port from MachineComponents '{compName}'");
+                                                            UAClient.Common.Log.Debug($"RemoteModule '{Name}': added Port from MachineComponents '{compName}'");
                                                         }
                                                         else if (remoteObj is RemoteStorage storage)
                                                         {
@@ -768,23 +767,23 @@ namespace UAClient.Client
                                                                 Components[compName] = compWrapper;
                                                             }
                                                             catch { }
-                                                            UAClient.Common.Log.Info($"RemoteModule '{Name}': added Storage from MachineComponents '{compName}'");
+                                                            UAClient.Common.Log.Debug($"RemoteModule '{Name}': added Storage from MachineComponents '{compName}'");
                                                         }
                                                         else if (remoteObj is RemoteLock rlock)
                                                         {
                                                             Lock = rlock;
-                                                            UAClient.Common.Log.Info($"RemoteModule '{Name}': set Lock from MachineComponents '{compName}'");
+                                                            UAClient.Common.Log.Debug($"RemoteModule '{Name}': set Lock from MachineComponents '{compName}'");
                                                         }
                                                         else if (remoteObj is RemoteComponent component)
                                                         {
                                                             Components[compName] = component;
-                                                            UAClient.Common.Log.Info($"RemoteModule '{Name}': added Component from MachineComponents '{compName}'");
+                                                            UAClient.Common.Log.Debug($"RemoteModule '{Name}': added Component from MachineComponents '{compName}'");
                                                         }
                                                         else if (remoteObj is RemoteSkill skill)
                                                         {
                                                             Methods[compName] = new RemoteMethod(compName, compId, _client);
                                                             Methods[$"skill:{compName}"] = skill;
-                                                            UAClient.Common.Log.Info($"RemoteModule '{Name}': added Skill from MachineComponents '{compName}'");
+                                                            UAClient.Common.Log.Debug($"RemoteModule '{Name}': added Skill from MachineComponents '{compName}'");
                                                         }
                                                     }
                                                 }
@@ -793,7 +792,7 @@ namespace UAClient.Client
                                                     // fallback: treat as generic component
                                                     var comp = new RemoteComponent(compName, compId, _client, _remoteServer);
                                                     lock (dictLock) { Components[compName] = comp; }
-                                                    UAClient.Common.Log.Info($"RemoteModule '{Name}': added Component from MachineComponents (fallback) '{compName}'");
+                                                    UAClient.Common.Log.Debug($"RemoteModule '{Name}': added Component from MachineComponents (fallback) '{compName}'");
                                                 }
                                             }
                                             catch { }
@@ -834,7 +833,7 @@ namespace UAClient.Client
                                                 {
                                                     Components[name] = component;
                                                 }
-                                                UAClient.Common.Log.Info($"RemoteModule '{Name}': heuristic added Component '{name}'");
+                                                UAClient.Common.Log.Debug($"RemoteModule '{Name}': heuristic added Component '{name}'");
                                                 return;
                                             }
                                             catch { }
@@ -884,7 +883,7 @@ namespace UAClient.Client
                                                         Methods[childName] = new RemoteMethod(childName, childSkillId, _client);
                                                         Methods[$"skill:{childName}"] = rs;
                                                     }
-                                                    UAClient.Common.Log.Info($"RemoteModule '{Name}': added Skill '{childName}' to SkillSet and Methods");
+                                                    UAClient.Common.Log.Debug($"RemoteModule '{Name}': added Skill '{childName}' to SkillSet and Methods");
                                                 }
                                                 else
                                                 {
@@ -902,7 +901,7 @@ namespace UAClient.Client
                             // Heuristics based on browse name and display name
                             if (browseName.IndexOf("Skill", StringComparison.OrdinalIgnoreCase) >= 0 || name.IndexOf("Skill", StringComparison.OrdinalIgnoreCase) >= 0)
                             {
-                                UAClient.Common.Log.Info($"RemoteModule '{Name}': creating RemoteSkill for {name}");
+                                UAClient.Common.Log.Debug($"RemoteModule '{Name}': creating RemoteSkill for {name}");
                                 lock (dictLock)
                                 {
                                     Methods[name] = new RemoteMethod(name, childId, _client); // compatibility
@@ -921,30 +920,30 @@ namespace UAClient.Client
                                         {
                                             // set single Lock instance
                                             Lock = lockObj;
-                                            UAClient.Common.Log.Info($"RemoteModule '{Name}': set Lock '{name}'");
+                                            UAClient.Common.Log.Debug($"RemoteModule '{Name}': set Lock '{name}'");
                                         }
                                         else if (remoteObj is RemotePort port)
                                         {
                                             Ports[name] = port;
                                             // also register the same instance in Components for unified access
                                             try { Components[name] = port; } catch { }
-                                            UAClient.Common.Log.Info($"RemoteModule '{Name}': added Port '{name}'");
+                                            UAClient.Common.Log.Debug($"RemoteModule '{Name}': added Port '{name}'");
                                         }
                                         else if (remoteObj is RemoteStorage storage)
                                         {
                                             Storages[name] = storage;
-                                            UAClient.Common.Log.Info($"RemoteModule '{Name}': added Storage '{name}'");
+                                            UAClient.Common.Log.Debug($"RemoteModule '{Name}': added Storage '{name}'");
                                         }
                                         else if (remoteObj is RemoteComponent component)
                                         {
                                             Components[name] = component;
-                                            UAClient.Common.Log.Info($"RemoteModule '{Name}': added Component '{name}'");
+                                            UAClient.Common.Log.Debug($"RemoteModule '{Name}': added Component '{name}'");
                                         }
                                         else if (remoteObj is RemoteSkill skill)
                                         {
                                             Methods[name] = new RemoteMethod(name, childId, _client);
                                             Methods[$"skill:{name}"] = skill;
-                                            UAClient.Common.Log.Info($"RemoteModule '{Name}': added Skill '{name}'");
+                                            UAClient.Common.Log.Debug($"RemoteModule '{Name}': added Skill '{name}'");
                                         }
                                     }
                                 }
@@ -1284,7 +1283,7 @@ namespace UAClient.Client
                 var isCoupled = await firstPort.IsCoupledAsync(_client);
                 if (isCoupled)
                 {
-                    UAClient.Common.Log.Info($"Module '{Name}': first port '{firstPort.Name}' already coupled");
+                    UAClient.Common.Log.Debug($"Module '{Name}': first port '{firstPort.Name}' already coupled");
                     return;
                 }
                 UAClient.Common.Log.Info($"Module '{Name}': coupling first port '{firstPort.Name}'");
@@ -1306,7 +1305,25 @@ namespace UAClient.Client
 
             // If not present, try to discover a candidate under the module node
             if (lockObj == null) return null;
-            
+
+            var ourAppName = _client?.Configuration?.ApplicationName ?? string.Empty;
+            var ourHostname = System.Net.Dns.GetHostName();
+
+            string NormalizeOwner(string? ownerValue)
+            {
+                return string.IsNullOrWhiteSpace(ownerValue)
+                    ? string.Empty
+                    : ownerValue.Trim('\'', '"', ' ');
+            }
+
+            bool OwnedByUs(string ownerValue)
+            {
+                if (string.IsNullOrEmpty(ownerValue)) return false;
+
+                return (!string.IsNullOrEmpty(ourAppName) && ownerValue.IndexOf(ourAppName, StringComparison.OrdinalIgnoreCase) >= 0) ||
+                       (!string.IsNullOrEmpty(ourHostname) && ownerValue.IndexOf(ourHostname, StringComparison.OrdinalIgnoreCase) >= 0);
+            }
+
             UAClient.Common.Log.Info($"Locking module {Name} via lock {lockObj.Name}");
             try
             {
@@ -1318,57 +1335,40 @@ namespace UAClient.Client
                     IsLockedByUs = false;
                     return false;
                 }
-                
+
                 var waitTimeout = TimeSpan.FromSeconds(10);
                 var lockedNow = await lockObj.WaitForLockedAsync(session, waitTimeout);
-                
+
                 if (!lockedNow)
                 {
                     UAClient.Common.Log.Warn($"Module lock not confirmed for {Name} after {waitTimeout.TotalSeconds}s");
                     IsLockedByUs = false;
                     return false;
                 }
-                
-                // NEW: Check if WE are the owner
+
                 try
                 {
-                    var owner = await lockObj.GetLockOwnerAsync(session);
-                    
-                    // Remove quotes from owner string (OPC UA might return "'localhost'" instead of "localhost")
-                    if (!string.IsNullOrEmpty(owner))
-                    {
-                        owner = owner.Trim('\'', '"', ' ');
-                    }
-                    
-                    var ourAppName = _client?.Configuration?.ApplicationName ?? string.Empty;
-                    var ourHostname = System.Net.Dns.GetHostName(); // Get computer hostname
-                    
+                    var owner = NormalizeOwner(await lockObj.GetLockOwnerAsync(session));
+
                     UAClient.Common.Log.Debug($"RemoteModule '{Name}': Lock owner='{owner}', AppName='{ourAppName}', Hostname='{ourHostname}'");
-                    
+
                     if (!string.IsNullOrEmpty(owner))
                     {
-                        // Check if owner contains ApplicationName OR Hostname
-                        if ((!string.IsNullOrEmpty(ourAppName) && owner.IndexOf(ourAppName, StringComparison.OrdinalIgnoreCase) >= 0) ||
-                            (!string.IsNullOrEmpty(ourHostname) && owner.IndexOf(ourHostname, StringComparison.OrdinalIgnoreCase) >= 0))
+                        if (OwnedByUs(owner))
                         {
                             UAClient.Common.Log.Info($"RemoteModule '{Name}': Successfully locked by us (Owner: {owner})");
                             IsLockedByUs = true;
                             return true;
                         }
-                        else
-                        {
-                            UAClient.Common.Log.Warn($"RemoteModule '{Name}': Module is locked by different client. Owner: '{owner}', Our AppName: '{ourAppName}', Our Hostname: '{ourHostname}'");
-                            IsLockedByUs = false;
-                            return false;
-                        }
+
+                        UAClient.Common.Log.Warn($"RemoteModule '{Name}': Module is locked by different client. Owner: '{owner}', Our AppName: '{ourAppName}', Our Hostname: '{ourHostname}'");
+                        IsLockedByUs = false;
+                        return false;
                     }
-                    else
-                    {
-                        // Owner konnte nicht ermittelt werden, assume success wenn locked
-                        UAClient.Common.Log.Warn($"RemoteModule '{Name}': Could not determine lock owner, assuming lock is ours");
-                        IsLockedByUs = true;
-                        return true;
-                    }
+
+                    UAClient.Common.Log.Warn($"RemoteModule '{Name}': Could not determine lock owner, assuming lock is ours");
+                    IsLockedByUs = true;
+                    return true;
                 }
                 catch (Exception ex)
                 {

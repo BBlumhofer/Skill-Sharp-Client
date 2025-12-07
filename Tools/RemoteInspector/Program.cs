@@ -88,7 +88,37 @@ internal class Program
 
             Console.WriteLine($"Module: {module.Name}");
             var neigh = module.Neighbors ?? new System.Collections.Generic.List<string>();
-            Console.WriteLine($"Neighbors: {string.Join(", ", neigh)}");
+            Console.WriteLine(neigh.Count == 0
+                ? "Neighbors: (none reported)"
+                : $"Neighbors: {string.Join(", ", neigh)}");
+
+            // Ports overview (include all discovered ports, not just coupled neighbors)
+            if (module.Ports == null || module.Ports.Count == 0)
+            {
+                Console.WriteLine("Ports: (none discovered)");
+            }
+            else
+            {
+                Console.WriteLine("Ports:");
+                foreach (var port in module.Ports.Values
+                             .OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase))
+                {
+                    bool isCoupled = false;
+                    try
+                    {
+                        isCoupled = await port.IsCoupledAsync(client);
+                    }
+                    catch { }
+
+                    var partnerTag = string.IsNullOrEmpty(port.PartnerRfidTag)
+                        ? "(no partner)"
+                        : port.PartnerRfidTag;
+
+                    Console.WriteLine(
+                        $" - {port.Name}: Coupled={isCoupled}, CoupleSkill={(PortSupportsCoupling(port) ? "yes" : "no")}, " +
+                        $"Active={port.ActivePort}, PartnerTag={partnerTag}");
+                }
+            }
 
             // Closed ports
             var map = module.GetClosedPortsPartnerRfidTags();
@@ -181,5 +211,36 @@ internal class Program
         }
 
         return 0;
+    }
+
+    private static bool PortSupportsCoupling(RemotePort port)
+    {
+        try
+        {
+            if (port.SkillSet.Keys.Any(k => k.IndexOf("couple", StringComparison.OrdinalIgnoreCase) >= 0))
+                return true;
+
+            if (port.Methods.Values.OfType<RemoteSkill>().Any(IsCoupleSkill))
+                return true;
+
+            if (port.Module != null)
+            {
+                if (port.Module.Methods.Values.OfType<RemoteSkill>().Any(IsCoupleSkill))
+                    return true;
+                if (port.Module.SkillSet.Values.Any(IsCoupleSkill))
+                    return true;
+            }
+        }
+        catch
+        {
+            // ignore capability detection errors
+        }
+
+        return false;
+    }
+
+    private static bool IsCoupleSkill(RemoteSkill skill)
+    {
+        return skill.Name.IndexOf("couple", StringComparison.OrdinalIgnoreCase) >= 0;
     }
 }

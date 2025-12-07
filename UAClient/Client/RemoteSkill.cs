@@ -162,7 +162,7 @@ namespace UAClient.Client
                 UAClient.Common.Log.Warn($"RemoteSkill '{Name}': parameter '{parameterName}' not found under {BaseNodeId}");
                 return;
             }
-            UAClient.Common.Log.Info($"RemoteSkill '{Name}': writing parameter {parameterName} -> {value}");
+            UAClient.Common.Log.Debug($"RemoteSkill '{Name}': writing parameter {parameterName} -> {value}");
             // Use UaClient helper if available
             try
             {
@@ -342,7 +342,7 @@ namespace UAClient.Client
                 if (_isFiniteHint.HasValue) return _isFiniteHint.Value;
                 if (_availableStates != null && _availableStates.Count > 0)
                 {
-                    try { UAClient.Common.Log.Info($"RemoteSkill '{Name}': AvailableStates count={_availableStates.Count}"); } catch { }
+                    try { UAClient.Common.Log.Debug($"RemoteSkill '{Name}': AvailableStates count={_availableStates.Count}"); } catch { }
                     foreach (var s in _availableStates)
                     {
                         if (string.Equals(s, "Completed", StringComparison.OrdinalIgnoreCase) ||
@@ -353,7 +353,7 @@ namespace UAClient.Client
                     }
                     return false;
                 }
-                try { UAClient.Common.Log.Info($"RemoteSkill '{Name}': AvailableStates unknown, FinalResultData.Count={FinalResultData?.Count ?? 0}"); } catch { }
+                try { UAClient.Common.Log.Debug($"RemoteSkill '{Name}': AvailableStates unknown, FinalResultData.Count={FinalResultData?.Count ?? 0}"); } catch { }
                 return FinalResultData != null && FinalResultData.Count > 0;
             }
         }
@@ -653,7 +653,7 @@ namespace UAClient.Client
                         if (parsed != null && parsed.Value != _cachedState)
                         {
                             _cachedState = parsed.Value;
-                            try { UAClient.Common.Log.Info($"RemoteSkill '{Name}': state changed -> {_cachedState}"); } catch { }
+                            try { UAClient.Common.Log.Debug($"RemoteSkill '{Name}': state changed -> {_cachedState}"); } catch { }
                             NotifyStateSubscribers(_cachedState);
                         }
                     }
@@ -750,11 +750,11 @@ namespace UAClient.Client
                 methodId = await FindMethodNodeRecursive(session, BaseNodeId, "Start");
             }
             if (methodId == null) throw new InvalidOperationException("Start method not found for skill");
-            UAClient.Common.Log.Info($"RemoteSkill '{Name}': calling Start method (methodId={methodId}) on BaseNodeId={BaseNodeId}");
+            UAClient.Common.Log.Debug($"RemoteSkill '{Name}': calling Start method (methodId={methodId}) on BaseNodeId={BaseNodeId}");
             try
             {
                 var callRes = await session.CallAsync(BaseNodeId, methodId, System.Threading.CancellationToken.None, inputs);
-                try { UAClient.Common.Log.Debug($"RemoteSkill '{Name}': Start call returned: {callRes}"); } catch { }
+                // start call result (verbose debug suppressed)
             }
             catch (Exception ex)
             {
@@ -787,8 +787,8 @@ namespace UAClient.Client
                     }
                     await Task.Delay(pollInterval);
                 }
-                if (seenRunning) { UAClient.Common.Log.Info($"RemoteSkill '{Name}': Start resulted in Running state"); return; }
-                if (seenCompleted) { UAClient.Common.Log.Info($"RemoteSkill '{Name}': Start resulted in Completed state"); return; }
+                if (seenRunning) { UAClient.Common.Log.Debug($"RemoteSkill '{Name}': Start resulted in Running state"); return; }
+                if (seenCompleted) { UAClient.Common.Log.Debug($"RemoteSkill '{Name}': Start resulted in Completed state"); return; }
             }
             catch (Exception ex)
             {
@@ -798,15 +798,15 @@ namespace UAClient.Client
             // Retry: if we have a dedicated state machine node, try calling Start there
             if (_stateMachineNode != null && !_stateMachineNode.Equals(BaseNodeId))
             {
-                UAClient.Common.Log.Info($"RemoteSkill '{Name}': Start did not change state, retrying Start on StateMachineNode={_stateMachineNode}");
+                UAClient.Common.Log.Debug($"RemoteSkill '{Name}': Start did not change state, retrying Start on StateMachineNode={_stateMachineNode}");
                 try
                 {
                     var callRes2 = await session.CallAsync(_stateMachineNode, methodId, System.Threading.CancellationToken.None, inputs);
-                    try { UAClient.Common.Log.Debug($"RemoteSkill '{Name}': Start retry call returned: {callRes2}"); } catch { }
+                    // start retry call result (verbose debug suppressed)
 
                     // brief wait again
                     var ok = await WaitForStateWithSubscriptionAsync(Common.SkillStates.Running, TimeSpan.FromSeconds(2)) || await WaitForStateWithSubscriptionAsync(Common.SkillStates.Completed, TimeSpan.FromSeconds(2));
-                    UAClient.Common.Log.Info($"RemoteSkill '{Name}': Start retry resulted in state change: {ok}");
+                    UAClient.Common.Log.Debug($"RemoteSkill '{Name}': Start retry resulted in state change: {ok}");
                 }
                 catch (Exception ex)
                 {
@@ -841,29 +841,29 @@ namespace UAClient.Client
             timeout ??= TimeSpan.FromSeconds(30);
 
             var sw = Stopwatch.StartNew();
-            UAClient.Common.Log.Info($"RemoteSkill '{Name}': ExecuteAsync start (waitForCompletion={waitForCompletion}, timeout={timeout})");
+            UAClient.Common.Log.Debug($"RemoteSkill '{Name}': ExecuteAsync start (waitForCompletion={waitForCompletion}, timeout={timeout})");
 
             // ensure lightweight discovery of skill nodes; create subscriptions when we will need them
             try
             {
                 var needSubscriptions = waitForCompletion || (FinalResultData != null && FinalResultData.Count > 0);
                 await SetupSubscriptionsAsync(_internalSubscriptionManager, needSubscriptions);
-                UAClient.Common.Log.Info($"RemoteSkill '{Name}': SetupSubscriptionsAsync completed (createdSubscriptions={needSubscriptions})");
+                UAClient.Common.Log.Debug($"RemoteSkill '{Name}': SetupSubscriptionsAsync completed (createdSubscriptions={needSubscriptions})");
             }
             catch (Exception ex) { UAClient.Common.Log.Warn($"RemoteSkill '{Name}': SetupSubscriptionsAsync failed: {ex.Message}"); }
 
             // ensure core subscriptions (CurrentState etc.) are present before executing
-            try { await EnsureCoreSubscribedAsync(); UAClient.Common.Log.Info($"RemoteSkill '{Name}': core subscribed={_coreSubscribed}"); } catch (Exception ex) { UAClient.Common.Log.Warn($"RemoteSkill '{Name}': EnsureCoreSubscribedAsync failed: {ex.Message}"); }
+            try { await EnsureCoreSubscribedAsync(); UAClient.Common.Log.Debug($"RemoteSkill '{Name}': core subscribed={_coreSubscribed}"); } catch (Exception ex) { UAClient.Common.Log.Warn($"RemoteSkill '{Name}': EnsureCoreSubscribedAsync failed: {ex.Message}"); }
 
             // Write parameters
             if (parameters != null)
             {
-                UAClient.Common.Log.Info($"RemoteSkill '{Name}': writing {parameters.Count} parameters");
+                UAClient.Common.Log.Debug($"RemoteSkill '{Name}': writing {parameters.Count} parameters");
                 foreach (var kv in parameters)
                 {
                     try
                     {
-                        UAClient.Common.Log.Debug($"RemoteSkill '{Name}': write parameter {kv.Key} = {kv.Value}");
+                        // parameter write details suppressed to avoid verbose debug output
                         await WriteParameterAsync(kv.Key, kv.Value ?? "");
                     }
                     catch (Exception ex)
@@ -954,8 +954,8 @@ namespace UAClient.Client
                 }
             }
 
-            UAClient.Common.Log.Info($"RemoteSkill '{Name}': invoking Start");
-            try { await StartAsync(); UAClient.Common.Log.Info($"RemoteSkill '{Name}': Start invoked"); } catch (Exception ex) { UAClient.Common.Log.Warn($"RemoteSkill '{Name}': StartAsync failed: {ex.Message}"); throw; }
+            UAClient.Common.Log.Debug($"RemoteSkill '{Name}': invoking Start");
+            try { await StartAsync(); UAClient.Common.Log.Debug($"RemoteSkill '{Name}': Start invoked"); } catch (Exception ex) { UAClient.Common.Log.Warn($"RemoteSkill '{Name}': StartAsync failed: {ex.Message}"); throw; }
 
             // Wait for Running state, but accept an immediate Completed as success (skill may be very short-lived)
             var runTimeout = TimeSpan.FromSeconds(10);
@@ -967,7 +967,7 @@ namespace UAClient.Client
             if (first == tRun) runningOk = await tRun;
             else completedOk = await tComp;
 
-            UAClient.Common.Log.Info($"RemoteSkill '{Name}': awaited Running => {runningOk}, awaited Completed => {completedOk}");
+            UAClient.Common.Log.Debug($"RemoteSkill '{Name}': awaited Running => {runningOk}, awaited Completed => {completedOk}");
 
             if (!runningOk && !completedOk)
             {
@@ -1012,7 +1012,7 @@ namespace UAClient.Client
                     }
                     catch { outDict[kv.Key] = null; }
                 }
-                UAClient.Common.Log.Info($"RemoteSkill '{Name}': Read FinalResultData keys={outDict.Count}");
+                UAClient.Common.Log.Debug($"RemoteSkill '{Name}': Read FinalResultData keys={outDict.Count}");
             }
 
             if (resetAfterCompletion)
@@ -1041,7 +1041,7 @@ namespace UAClient.Client
             }
 
             sw.Stop();
-            UAClient.Common.Log.Info($"RemoteSkill '{Name}': ExecuteAsync finished in {sw.ElapsedMilliseconds} ms");
+            UAClient.Common.Log.Debug($"RemoteSkill '{Name}': ExecuteAsync finished in {sw.ElapsedMilliseconds} ms");
             return outDict;
         }
 

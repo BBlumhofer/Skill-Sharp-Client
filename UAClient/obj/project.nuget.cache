@@ -1,8 +1,8 @@
 {
   "version": 2,
-  "dgSpecHash": "RHFzixcqsO4=",
+  "dgSpecHash": "5J2eAbQS5mc=",
   "success": true,
-  "projectFilePath": "c:\\Users\\bebl01\\Repos\\CSharpEnv\\Skill-Sharp-Client\\UAClient\\UAClient.csproj",
+  "projectFilePath": "C:\\Users\\bebl01\\Repos\\CSharpEnv\\Skill-Sharp-Client\\UAClient\\UAClient.csproj",
   "expectedPackageFiles": [
     "C:\\Users\\bebl01\\.nuget\\packages\\bitfaster.caching\\2.5.4\\bitfaster.caching.2.5.4.nupkg.sha512",
     "C:\\Users\\bebl01\\.nuget\\packages\\microsoft.extensions.dependencyinjection.abstractions\\9.0.9\\microsoft.extensions.dependencyinjection.abstractions.9.0.9.nupkg.sha512",

@@ -14,7 +14,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyDescriptionAttribute("OPC UA Client Library for Skill-based Manufacturing Systems")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+32eac790a3628bfef9c7cbb83d2abff199f3522e")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+656b77b84d22bd1885f18a48015184dd29ff269e")]
 [assembly: System.Reflection.AssemblyProductAttribute("SkillSharp.Client")]
 [assembly: System.Reflection.AssemblyTitleAttribute("SkillSharp.Client")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

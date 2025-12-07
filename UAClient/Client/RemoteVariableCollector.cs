@@ -146,7 +146,7 @@ namespace UAClient.Client
                     try { await System.Threading.Tasks.Task.WhenAll(readTasks); } catch { }
                 }
             }
-            UAClient.Common.Log.Info($"RemoteVariableCollector: traversal complete. variables-added={added}, skipped-non-variable={skippedNonVariable}, read-failures={failed}, total-visited={visited.Count}");
+            UAClient.Common.Log.Debug($"RemoteVariableCollector: traversal complete. variables-added={added}, skipped-non-variable={skippedNonVariable}, read-failures={failed}, total-visited={visited.Count}");
         }
     }
 }

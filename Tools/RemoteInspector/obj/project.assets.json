@@ -417,11 +417,11 @@
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "c:\\Users\\bebl01\\Repos\\CSharpEnv\\Skill-Sharp-Client\\Tools\\RemoteInspector\\RemoteInspector.csproj",
+      "projectUniqueName": "C:\\Users\\bebl01\\Repos\\CSharpEnv\\Skill-Sharp-Client\\Tools\\RemoteInspector\\RemoteInspector.csproj",
       "projectName": "RemoteInspector",
-      "projectPath": "c:\\Users\\bebl01\\Repos\\CSharpEnv\\Skill-Sharp-Client\\Tools\\RemoteInspector\\RemoteInspector.csproj",
+      "projectPath": "C:\\Users\\bebl01\\Repos\\CSharpEnv\\Skill-Sharp-Client\\Tools\\RemoteInspector\\RemoteInspector.csproj",
       "packagesPath": "C:\\Users\\bebl01\\.nuget\\packages\\",
-      "outputPath": "c:\\Users\\bebl01\\Repos\\CSharpEnv\\Skill-Sharp-Client\\Tools\\RemoteInspector\\obj\\",
+      "outputPath": "C:\\Users\\bebl01\\Repos\\CSharpEnv\\Skill-Sharp-Client\\Tools\\RemoteInspector\\obj\\",
       "projectStyle": "PackageReference",
       "fallbackFolders": [
         "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"
@@ -443,8 +443,8 @@
         "net10.0": {
           "targetAlias": "net10.0",
           "projectReferences": {
-            "c:\\Users\\bebl01\\Repos\\CSharpEnv\\Skill-Sharp-Client\\UAClient\\UAClient.csproj": {
-              "projectPath": "c:\\Users\\bebl01\\Repos\\CSharpEnv\\Skill-Sharp-Client\\UAClient\\UAClient.csproj"
+            "C:\\Users\\bebl01\\Repos\\CSharpEnv\\Skill-Sharp-Client\\UAClient\\UAClient.csproj": {
+              "projectPath": "C:\\Users\\bebl01\\Repos\\CSharpEnv\\Skill-Sharp-Client\\UAClient\\UAClient.csproj"
             }
           }
         }

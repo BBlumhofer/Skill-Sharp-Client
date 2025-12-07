@@ -149,7 +149,7 @@ namespace UAClient.Client
             if (session == null) throw new InvalidOperationException("No session");
 
             // Prefer explicit methods discovered during module discovery. Do not perform runtime recursive browse here.
-            string[] candidates = new[] { "InitLock", "BreakLock", "RenewLock", "ExitLock", "AcquireLock", "EnterLock", "RequestLock", "Lock", "Init" };
+            string[] candidates = new[] { "InitLock", "RenewLock", "ExitLock", "AcquireLock", "EnterLock", "RequestLock", "Lock", "Init" };
             foreach (var cand in candidates)
             {
                 try
