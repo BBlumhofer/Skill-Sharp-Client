@@ -1004,6 +1004,23 @@ namespace UAClient.Client
                         }
                     }
                 }
+
+                // Storages and their slots: set client and optionally subscribe
+                foreach (var storage in Storages.Values)
+                {
+                    foreach (var sv in storage.Variables.Values)
+                    {
+                        try { sv.SetClient(_client); if (createSubscriptions && subscriptionManager != null) await sv.SetupSubscriptionAsync(subscriptionManager); } catch { }
+                    }
+
+                    foreach (var slot in storage.Slots.Values)
+                    {
+                        foreach (var sv in slot.Variables.Values)
+                        {
+                            try { sv.SetClient(_client); if (createSubscriptions && subscriptionManager != null) await sv.SetupSubscriptionAsync(subscriptionManager); } catch { }
+                        }
+                    }
+                }
             }
             catch (Exception ex)
             {
@@ -1255,6 +1272,27 @@ namespace UAClient.Client
                     {
                         try { lv.SetClient(_client); await lv.SetupSubscriptionAsync(subscriptionManager); } catch { }
                     }
+                }
+
+                // Storage variables (including slot variables) so inventory/state changes raise data change notifications
+                foreach (var storage in Storages.Values)
+                {
+                    try
+                    {
+                        foreach (var sv in storage.Variables.Values)
+                        {
+                            try { sv.SetClient(_client); await sv.SetupSubscriptionAsync(subscriptionManager); } catch { }
+                        }
+
+                        foreach (var slot in storage.Slots.Values)
+                        {
+                            foreach (var v in slot.Variables.Values)
+                            {
+                                try { v.SetClient(_client); await v.SetupSubscriptionAsync(subscriptionManager); } catch { }
+                            }
+                        }
+                    }
+                    catch { }
                 }
 
                 // Subscribe core for skills and components contained in this module
@@ -1732,6 +1770,27 @@ namespace UAClient.Client
             }
         }
 
+        /// <summary>
+        /// Public wrapper to trigger a recovery run for this module.
+        /// Intended to be invoked by RemoteServer after reconnect to ensure
+        /// lock/coupling/startup state is restored.
+        /// </summary>
+        public async Task EnsureRecoveryAsync(string reason = "ManualEnsureRecovery")
+        {
+            await Task.Run(async () =>
+            {
+                try
+                {
+                    // Call the internal recovery implementation
+                    await TriggerRecoveryAsync(reason);
+                }
+                catch (Exception ex)
+                {
+                    UAClient.Common.Log.Error($"RemoteModule '{Name}': EnsureRecoveryAsync failed: {ex.Message}");
+                }
+            });
+        }
+
         private async Task OnRecoveryLockChangedAsync()
         {
             try
@@ -1867,50 +1926,75 @@ namespace UAClient.Client
                     return;
                 }
 
-                // Step 2: NOW we can halt all skills (we have the lock!)
-                UAClient.Common.Log.Info($"RemoteModule '{Name}': Recovery Step 2/3 - Halting all skills...");
+                // Step 2: Ensure couple skills / ports are active (do not stop running Couple or Startup skills)
+                UAClient.Common.Log.Info($"RemoteModule '{Name}': Recovery Step 2/3 - Ensuring couple skills and ports are active (non-disruptive)");
                 try
                 {
-                    var skills = Methods.Values.OfType<RemoteSkill>().ToList();
-                    var haltTasks = new List<Task>();
-
-                    foreach (var skill in skills)
+                    var ports = Ports.Values.ToList();
+                    foreach (var port in ports)
                     {
-                        if (skill.CurrentState != UAClient.Common.SkillStates.Halted)
+                        try
                         {
-                            UAClient.Common.Log.Debug($"RemoteModule '{Name}': Halting skill '{skill.Name}'");
-                            haltTasks.Add(Task.Run(async () =>
+                            var coupled = await port.IsCoupledAsync(_client);
+                            if (coupled)
                             {
-                                try { await skill.HaltAsync(); }
-                                catch (Exception ex) { UAClient.Common.Log.Debug($"Halt '{skill.Name}' failed: {ex.Message}"); }
-                            }));
+                                UAClient.Common.Log.Info($"RemoteModule '{Name}': Port '{port.Name}' already coupled");
+                                continue;
+                            }
+
+                            UAClient.Common.Log.Info($"RemoteModule '{Name}': Port '{port.Name}' not coupled, attempting CoupleSkill start");
+                            await port.CoupleAsync(_client, TimeSpan.FromSeconds(30));
+                            var after = await port.IsCoupledAsync(_client);
+                            if (after)
+                            {
+                                UAClient.Common.Log.Info($"RemoteModule '{Name}': Port '{port.Name}' coupled successfully");
+                            }
+                            else
+                            {
+                                UAClient.Common.Log.Warn($"RemoteModule '{Name}': Port '{port.Name}' did not become coupled after CoupleSkill attempt");
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            UAClient.Common.Log.Warn($"RemoteModule '{Name}': Error ensuring coupling for port '{port.Name}': {ex.Message}");
                         }
                     }
-
-                    if (haltTasks.Count > 0)
-                    {
-                        await Task.WhenAll(haltTasks);
-                        // Wait for skills to reach Halted state
-                        await Task.Delay(2000);
-                    }
-
-                    UAClient.Common.Log.Info($"RemoteModule '{Name}': ✓ All skills halted");
                 }
                 catch (Exception ex)
                 {
-                    UAClient.Common.Log.Warn($"RemoteModule '{Name}': Error halting skills: {ex.Message}");
+                    UAClient.Common.Log.Warn($"RemoteModule '{Name}': Error during coupling step: {ex.Message}");
                 }
 
-                // Step 3: Restart StartupSkill
-                UAClient.Common.Log.Info($"RemoteModule '{Name}': Recovery Step 3/3 - Restarting StartupSkill...");
+                // Step 3: Ensure StartupSkill is running. If it's already running, do not stop/restart it.
+                UAClient.Common.Log.Info($"RemoteModule '{Name}': Recovery Step 3/3 - Ensuring StartupSkill is running (non-disruptive)");
                 try
                 {
-                    await StartAsync(reset: true, timeout: TimeSpan.FromSeconds(30), couple: false);
-                    UAClient.Common.Log.Info($"RemoteModule '{Name}': ✓ StartupSkill restarted");
+                    var startupSkill = Methods.Values
+                        .OfType<RemoteSkill>()
+                        .FirstOrDefault(s => s.Name.IndexOf("Startup", StringComparison.OrdinalIgnoreCase) >= 0);
+
+                    if (startupSkill == null)
+                    {
+                        UAClient.Common.Log.Info($"RemoteModule '{Name}': No StartupSkill found, skipping startup ensure");
+                    }
+                    else
+                    {
+                        var st = await startupSkill.GetStateAsync();
+                        if (st == (int)UAClient.Common.SkillStates.Running)
+                        {
+                            UAClient.Common.Log.Info($"RemoteModule '{Name}': StartupSkill already running, leaving it running");
+                        }
+                        else
+                        {
+                            UAClient.Common.Log.Info($"RemoteModule '{Name}': StartupSkill not running (state={st}), starting startup skill");
+                            await StartAsync(reset: true, timeout: TimeSpan.FromSeconds(30), couple: false);
+                            UAClient.Common.Log.Info($"RemoteModule '{Name}': ✓ StartupSkill started");
+                        }
+                    }
                 }
                 catch (Exception ex)
                 {
-                    UAClient.Common.Log.Error($"RemoteModule '{Name}': Error restarting startup: {ex.Message}");
+                    UAClient.Common.Log.Error($"RemoteModule '{Name}': Error ensuring startup: {ex.Message}");
                     return;
                 }
 

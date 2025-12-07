@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
 using Opc.Ua;
@@ -695,6 +696,62 @@ namespace UAClient.Client
             return null;
         }
 
+        private static bool IsTransitionState(Common.SkillStates state)
+        {
+            switch (state)
+            {
+                case Common.SkillStates.Starting:
+                case Common.SkillStates.Halting:
+                case Common.SkillStates.Completing:
+                case Common.SkillStates.Resetting:
+                case Common.SkillStates.Suspending:
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        private static bool IsResetCandidate(Common.SkillStates state)
+        {
+            switch (state)
+            {
+                case Common.SkillStates.Halted:
+                case Common.SkillStates.Completed:
+                case Common.SkillStates.Suspended:
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        private static Common.SkillStates? NormalizeState(int? stateValue)
+        {
+            if (!stateValue.HasValue) return null;
+            if (Enum.IsDefined(typeof(Common.SkillStates), stateValue.Value)) return (Common.SkillStates)stateValue.Value;
+            return null;
+        }
+
+        private async Task<Common.SkillStates?> WaitForStableStateAsync(Common.SkillStates? currentState, TimeSpan timeout)
+        {
+            if (!currentState.HasValue) return null;
+            if (!IsTransitionState(currentState.Value)) return currentState;
+
+            var sw = Stopwatch.StartNew();
+            var state = currentState.Value;
+            while (sw.Elapsed < timeout)
+            {
+                UAClient.Common.Log.Info($"RemoteSkill '{Name}': waiting for transition state {state} to settle");
+                await Task.Delay(TimeSpan.FromMilliseconds(500));
+                var refreshed = NormalizeState(await GetStateAsync());
+                if (!refreshed.HasValue) return null;
+                state = refreshed.Value;
+                if (!IsTransitionState(state)) return state;
+            }
+
+            UAClient.Common.Log.Warn($"RemoteSkill '{Name}': transition state {state} did not settle within {timeout}");
+            return state;
+        }
+
         private async Task<bool> WaitForStateWithSubscriptionAsync(Common.SkillStates desired, TimeSpan timeout)
         {
             // quick check
@@ -724,9 +781,19 @@ namespace UAClient.Client
             }
         }
 
-        public async Task<bool> WaitForStateAsync(Common.SkillStates desired, TimeSpan timeout)
+        public async Task<bool> WaitForStateAsync(Common.SkillStates desired, TimeSpan timeout, bool preferSubscriptions = true)
         {
-            var sw = System.Diagnostics.Stopwatch.StartNew();
+            if (preferSubscriptions)
+            {
+                try
+                {
+                    var ok = await WaitForStateWithSubscriptionAsync(desired, timeout);
+                    if (ok) return true;
+                }
+                catch { }
+            }
+
+            var sw = Stopwatch.StartNew();
             while (sw.Elapsed < timeout)
             {
                 try
@@ -735,9 +802,79 @@ namespace UAClient.Client
                     if (st != null && st == (int)desired) return true;
                 }
                 catch { }
-                await Task.Delay(500);
+                await Task.Delay(TimeSpan.FromMilliseconds(250));
             }
             return false;
+        }
+
+        public async Task SetInputParametersAsync(IDictionary<string, object?>? parameters, bool skipNullValues = false)
+        {
+            if (parameters == null || parameters.Count == 0) return;
+            foreach (var kv in parameters)
+            {
+                if (skipNullValues && kv.Value == null) continue;
+                
+                // Log parameter details before writing to OPC UA
+                var valueType = kv.Value?.GetType().Name ?? "null";
+                var valueDisplay = kv.Value?.ToString() ?? "<null>";
+                UAClient.Common.Log.Info($"RemoteSkill '{Name}': writing parameter '{kv.Key}' with type={valueType}, value={valueDisplay}");
+                
+                await WriteParameterAsync(kv.Key, kv.Value ?? string.Empty);
+            }
+        }
+
+        public async Task<IDictionary<string, object?>> ReadInputParametersAsync(IEnumerable<string>? parameterNames = null, bool refresh = false)
+        {
+            await EnsureParameterSetAvailableAsync();
+            var names = parameterNames?.ToList() ?? ParameterSet.Keys.ToList();
+            var result = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+            if (names.Count == 0) return result;
+
+            Session? session = null;
+            if (refresh)
+            {
+                session = RemoteServerClient.Session ?? throw new InvalidOperationException("No session");
+            }
+
+            foreach (var name in names)
+            {
+                if (!ParameterSet.TryGetValue(name, out var variable)) continue;
+                if (refresh && session != null)
+                {
+                    await RefreshRemoteVariableAsync(variable, session);
+                }
+                result[name] = variable.Value;
+            }
+
+            return result;
+        }
+
+        public async Task<IDictionary<string, object?>> ReadMonitoringDataAsync(IEnumerable<string>? variableNames = null, bool refresh = false)
+        {
+            await EnsureMonitoringAvailableAsync(createSubscriptions: true);
+            try { await EnsureCoreSubscribedAsync(); } catch { }
+
+            var names = variableNames?.ToList() ?? Monitoring.Keys.ToList();
+            var result = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+            if (names.Count == 0) return result;
+
+            Session? session = null;
+            if (refresh)
+            {
+                session = RemoteServerClient.Session ?? throw new InvalidOperationException("No session");
+            }
+
+            foreach (var name in names)
+            {
+                if (!Monitoring.TryGetValue(name, out var variable)) continue;
+                if (refresh && session != null)
+                {
+                    await RefreshRemoteVariableAsync(variable, session);
+                }
+                result[name] = variable.Value;
+            }
+
+            return result;
         }
 
         public async Task StartAsync(params object[] inputs)
@@ -875,26 +1012,36 @@ namespace UAClient.Client
 
             // Check and handle pre-start states:
             bool resetDenied = false;
+            bool skipStartDueToRunning = false;
             try
             {
-                var st = await GetStateAsync();
-                // If skill is in Starting/Running/Completing, consider it already running and abort
-                if (st == (int)Common.SkillStates.Starting || st == (int)Common.SkillStates.Running || st == (int)Common.SkillStates.Completing)
-                {
-                    throw new InvalidOperationException($"RemoteSkill '{Name}' is already running (state={st})");
-                }
+                var normalizedState = NormalizeState(await GetStateAsync());
+                normalizedState = await WaitForStableStateAsync(normalizedState, timeout.Value);
 
-                // If skill is Halted, Completed or Suspended, reset it before starting if requested
-                if ((st == (int)Common.SkillStates.Halted || st == (int)Common.SkillStates.Completed || st == (int)Common.SkillStates.Suspended) && resetBeforeIfHalted)
+                if (normalizedState.HasValue && normalizedState.Value == Common.SkillStates.Running)
                 {
-                    try
+                    if (IsFinite)
                     {
-                        var resetTarget = _stateMachineNode ?? BaseNodeId;
-                        var resetMethod = _resetMethodNode ?? await FindMethodNodeRecursive(session, resetTarget, "Reset");
-                        if (resetMethod != null)
+                        throw new InvalidOperationException($"RemoteSkill '{Name}' is already running (state={(int)normalizedState.Value})");
+                    }
+
+                    skipStartDueToRunning = true;
+                    UAClient.Common.Log.Info($"RemoteSkill '{Name}': continuous skill already running; skipping Reset/Start");
+                }
+                else if (normalizedState.HasValue && IsResetCandidate(normalizedState.Value))
+                {
+                    if (resetBeforeIfHalted)
+                    {
+                        UAClient.Common.Log.Info($"RemoteSkill '{Name}': attempting Reset before start (state={(int)normalizedState.Value})");
+                        try
                         {
-                            UAClient.Common.Log.Info($"RemoteSkill '{Name}': attempting Reset before start (state={st})");
-                            try
+                            var resetTarget = _stateMachineNode ?? BaseNodeId;
+                            var resetMethod = _resetMethodNode ?? await FindMethodNodeRecursive(session, resetTarget, "Reset");
+                            if (resetMethod == null)
+                            {
+                                UAClient.Common.Log.Warn($"RemoteSkill '{Name}': Reset method not found before start");
+                            }
+                            else
                             {
                                 await session.CallAsync(resetTarget, resetMethod, System.Threading.CancellationToken.None);
                                 var ok = await WaitForStateWithSubscriptionAsync(Common.SkillStates.Ready, timeout.Value);
@@ -907,38 +1054,45 @@ namespace UAClient.Client
                                     UAClient.Common.Log.Warn($"RemoteSkill '{Name}': Reset before start did not reach Ready within timeout");
                                 }
                             }
-                            catch (ServiceResultException sre) when (sre.StatusCode == StatusCodes.BadUserAccessDenied)
-                            {
-                                // Reset is not allowed for this user; record and continue to attempt Start anyway
-                                resetDenied = true;
-                                UAClient.Common.Log.Warn($"RemoteSkill '{Name}': Reset before start failed: {sre.StatusCode}");
-                            }
-                            catch (Exception ex)
-                            {
-                                UAClient.Common.Log.Warn($"RemoteSkill '{Name}': Reset before start failed: {ex.Message}");
-                                throw;
-                            }
+                        }
+                        catch (ServiceResultException sre) when (sre.StatusCode == StatusCodes.BadUserAccessDenied)
+                        {
+                            resetDenied = true;
+                            UAClient.Common.Log.Warn($"RemoteSkill '{Name}': Reset before start failed: {sre.StatusCode}");
+                        }
+                        catch (Exception ex)
+                        {
+                            UAClient.Common.Log.Warn($"RemoteSkill '{Name}': Reset before start failed: {ex.Message}");
+                            throw;
                         }
                     }
-                    catch (Exception ex)
+                    else
                     {
-                        UAClient.Common.Log.Warn($"RemoteSkill '{Name}': Reset before start failed: {ex.Message}");
-                        throw;
+                        UAClient.Common.Log.Info($"RemoteSkill '{Name}': not resetting before start (state={(int)normalizedState.Value}, resetBeforeIfHalted=false)");
                     }
                 }
-                else if ((st == (int)Common.SkillStates.Halted || st == (int)Common.SkillStates.Completed || st == (int)Common.SkillStates.Suspended) && !resetBeforeIfHalted)
+                else if (!normalizedState.HasValue)
                 {
-                    UAClient.Common.Log.Info($"RemoteSkill '{Name}': not resetting before start (state={st}, resetBeforeIfHalted=false)");
+                    UAClient.Common.Log.Warn($"RemoteSkill '{Name}': unable to determine state before execution");
+                }
+                else if (IsTransitionState(normalizedState.Value))
+                {
+                    UAClient.Common.Log.Warn($"RemoteSkill '{Name}': skill remained in transition state {normalizedState.Value} before start");
                 }
             }
             catch (InvalidOperationException)
             {
-                // propagate running-state exception
                 throw;
             }
             catch
             {
                 // swallow other errors to preserve previous behaviour
+            }
+
+            if (skipStartDueToRunning)
+            {
+                sw.Stop();
+                return await ReadFinalResultSnapshotAsync(session);
             }
 
             var cur = await GetStateAsync();
@@ -955,7 +1109,34 @@ namespace UAClient.Client
             }
 
             UAClient.Common.Log.Debug($"RemoteSkill '{Name}': invoking Start");
-            try { await StartAsync(); UAClient.Common.Log.Debug($"RemoteSkill '{Name}': Start invoked"); } catch (Exception ex) { UAClient.Common.Log.Warn($"RemoteSkill '{Name}': StartAsync failed: {ex.Message}"); throw; }
+            ServiceResultException? invalidStateException = null;
+            try
+            {
+                await StartAsync();
+                UAClient.Common.Log.Debug($"RemoteSkill '{Name}': Start invoked");
+            }
+            catch (ServiceResultException sre) when (sre.StatusCode == StatusCodes.BadInvalidState)
+            {
+                invalidStateException = sre;
+                UAClient.Common.Log.Warn($"RemoteSkill '{Name}': StartAsync failed with BadInvalidState; attempting recovery");
+            }
+            catch (Exception ex)
+            {
+                UAClient.Common.Log.Warn($"RemoteSkill '{Name}': StartAsync failed: {ex.Message}");
+                throw;
+            }
+
+            if (invalidStateException != null)
+            {
+                var recovered = await TryRecoverFromInvalidStateAsync(timeout.Value);
+                if (!recovered)
+                {
+                    throw invalidStateException;
+                }
+
+                UAClient.Common.Log.Info($"RemoteSkill '{Name}': retrying Start after recovery");
+                await StartAsync();
+            }
 
             // Wait for Running state, but accept an immediate Completed as success (skill may be very short-lived)
             var runTimeout = TimeSpan.FromSeconds(10);
@@ -996,24 +1177,7 @@ namespace UAClient.Client
             }
 
             // Prefer values populated by subscriptions; fall back to reads
-            var outDict = new Dictionary<string, object?>();
-            if (FinalResultData != null)
-            {
-                foreach (var kv in FinalResultData)
-                {
-                    try
-                    {
-                        var rv = kv.Value;
-                        if (rv != null && rv.Value != null) { outDict[kv.Key] = rv.Value; continue; }
-                        var node = rv?.NodeId;
-                        if (node == null) { outDict[kv.Key] = null; continue; }
-                        var dv = await session.ReadValueAsync(node, System.Threading.CancellationToken.None);
-                        outDict[kv.Key] = dv?.Value;
-                    }
-                    catch { outDict[kv.Key] = null; }
-                }
-                UAClient.Common.Log.Debug($"RemoteSkill '{Name}': Read FinalResultData keys={outDict.Count}");
-            }
+            var outDict = await ReadFinalResultSnapshotAsync(session);
 
             if (resetAfterCompletion)
             {
@@ -1043,6 +1207,257 @@ namespace UAClient.Client
             sw.Stop();
             UAClient.Common.Log.Debug($"RemoteSkill '{Name}': ExecuteAsync finished in {sw.ElapsedMilliseconds} ms");
             return outDict;
+        }
+
+        public async Task<long?> GetSuccessfulExecutionsCountAsync()
+        {
+            await EnsureFinalResultDataAvailableAsync();
+            var session = RemoteServerClient.Session ?? throw new InvalidOperationException("No session");
+            var snapshot = await ReadFinalResultSnapshotAsync(session);
+            return TryExtractSuccessfulExecutionsCount(snapshot);
+        }
+
+        /// <summary>
+        /// Reads FinalResultData and optionally waits for an expected SuccessfulExecutionsCount to be reached.
+        /// </summary>
+        public async Task<IDictionary<string, object?>?> ReadFinalResultDataAsync(TimeSpan? timeout = null, long? expectedSuccessfulExecutions = null)
+        {
+            await EnsureFinalResultDataAvailableAsync();
+            var session = RemoteServerClient.Session ?? throw new InvalidOperationException("No session");
+            timeout ??= TimeSpan.FromSeconds(5);
+
+            IDictionary<string, object?>? lastSnapshot = null;
+            var sw = Stopwatch.StartNew();
+            
+            // If waiting for a specific count, log it for debugging
+            if (expectedSuccessfulExecutions.HasValue)
+            {
+                UAClient.Common.Log.Debug($"RemoteSkill '{Name}': waiting for SuccessfulExecutionsCount >= {expectedSuccessfulExecutions.Value} (timeout={timeout.Value.TotalSeconds}s)");
+            }
+            
+            while (sw.Elapsed < timeout.Value)
+            {
+                var snapshot = await ReadFinalResultSnapshotAsync(session);
+                lastSnapshot = snapshot;
+                
+                if (snapshot != null && snapshot.Count > 0)
+                {
+                    if (!expectedSuccessfulExecutions.HasValue)
+                    {
+                        return snapshot;
+                    }
+
+                    var count = TryExtractSuccessfulExecutionsCount(snapshot);
+                    if (count.HasValue)
+                    {
+                        if (count.Value >= expectedSuccessfulExecutions.Value)
+                        {
+                            UAClient.Common.Log.Debug($"RemoteSkill '{Name}': SuccessfulExecutionsCount reached {count.Value} (expected >= {expectedSuccessfulExecutions.Value}) after {sw.ElapsedMilliseconds}ms");
+                            return snapshot;
+                        }
+                        else
+                        {
+                            UAClient.Common.Log.Debug($"RemoteSkill '{Name}': SuccessfulExecutionsCount is {count.Value}, waiting for >= {expectedSuccessfulExecutions.Value} (elapsed: {sw.ElapsedMilliseconds}ms)");
+                        }
+                    }
+                }
+
+                await Task.Delay(TimeSpan.FromMilliseconds(100));
+            }
+
+            // Log warning if we timed out waiting for the expected count
+            if (expectedSuccessfulExecutions.HasValue && lastSnapshot != null)
+            {
+                var finalCount = TryExtractSuccessfulExecutionsCount(lastSnapshot);
+                UAClient.Common.Log.Warn($"RemoteSkill '{Name}': ReadFinalResultDataAsync timed out. Expected count >= {expectedSuccessfulExecutions.Value}, actual count = {finalCount?.ToString() ?? "null"}");
+            }
+
+            return lastSnapshot;
+        }
+
+        /// <summary>
+        /// Public helper to capture a one-time snapshot of FinalResultData using the current session.
+        /// Allows higher layers to control reset timing while still leveraging the client's snapshot logic.
+        /// </summary>
+        public async Task<IDictionary<string, object?>> ReadFinalResultDataSnapshotAsync()
+        {
+            var session = RemoteServerClient.Session ?? throw new InvalidOperationException("No session");
+            return await ReadFinalResultSnapshotAsync(session);
+        }
+
+        private async Task<Dictionary<string, object?>> ReadFinalResultSnapshotAsync(Session session)
+        {
+            var outDict = new Dictionary<string, object?>();
+            if (FinalResultData != null)
+            {
+                foreach (var kv in FinalResultData)
+                {
+                    try
+                    {
+                        var rv = kv.Value;
+                        var node = rv?.NodeId;
+                        if (node == null)
+                        {
+                            outDict[kv.Key] = rv?.Value;
+                            continue;
+                        }
+
+                        var dv = await session.ReadValueAsync(node, System.Threading.CancellationToken.None);
+                        outDict[kv.Key] = dv?.Value;
+                        try { rv?.UpdateFromDataValue(dv); } catch { }
+                    }
+                    catch { outDict[kv.Key] = null; }
+                }
+                UAClient.Common.Log.Debug($"RemoteSkill '{Name}': Read FinalResultData keys={outDict.Count}");
+            }
+            return outDict;
+        }
+
+        private async Task<bool> TryRecoverFromInvalidStateAsync(TimeSpan timeout)
+        {
+            try
+            {
+                var session = RemoteServerClient.Session;
+                if (session == null) return false;
+
+                // Wait briefly if the server reports that the state machine is still in a running transition
+                var current = await GetStateAsync();
+                var waitSlice = TimeSpan.FromMilliseconds(Math.Clamp(timeout.TotalMilliseconds / 3, 500, 4000));
+                if (current == (int)Common.SkillStates.Starting || current == (int)Common.SkillStates.Running || current == (int)Common.SkillStates.Completing)
+                {
+                    UAClient.Common.Log.Info($"RemoteSkill '{Name}': waiting for skill to leave running state before retrying Start (state={current})");
+                    await WaitForStateWithSubscriptionAsync(Common.SkillStates.Completed, waitSlice);
+                    await WaitForStateWithSubscriptionAsync(Common.SkillStates.Halted, waitSlice);
+                }
+
+                try
+                {
+                    await HaltAsync();
+                    await WaitForStateWithSubscriptionAsync(Common.SkillStates.Halted, waitSlice);
+                }
+                catch (Exception ex)
+                {
+                    UAClient.Common.Log.Debug($"RemoteSkill '{Name}': Halt during recovery failed: {ex.Message}");
+                }
+
+                try
+                {
+                    await ResetAsync();
+                    var ready = await WaitForStateWithSubscriptionAsync(Common.SkillStates.Ready, timeout);
+                    if (!ready)
+                    {
+                        UAClient.Common.Log.Warn($"RemoteSkill '{Name}': recovery reset did not reach Ready");
+                    }
+                    return ready;
+                }
+                catch (Exception ex)
+                {
+                    UAClient.Common.Log.Warn($"RemoteSkill '{Name}': recovery reset failed: {ex.Message}");
+                    return false;
+                }
+            }
+            catch (Exception ex)
+            {
+                UAClient.Common.Log.Warn($"RemoteSkill '{Name}': recovery from BadInvalidState failed: {ex.Message}");
+                return false;
+            }
+        }
+
+        private async Task EnsureParameterSetAvailableAsync()
+        {
+            if (ParameterSet.Count > 0) return;
+            try { await SetupSubscriptionsAsync(_remoteServer?.SubscriptionManager, false); } catch { }
+        }
+
+        private async Task EnsureMonitoringAvailableAsync(bool createSubscriptions)
+        {
+            if (Monitoring.Count > 0) return;
+            try { await SetupSubscriptionsAsync(_remoteServer?.SubscriptionManager, createSubscriptions); } catch { }
+        }
+
+        private async Task EnsureFinalResultDataAvailableAsync()
+        {
+            if (FinalResultData.Count > 0) return;
+            try { await SetupSubscriptionsAsync(_remoteServer?.SubscriptionManager, false); } catch { }
+        }
+
+        private static async Task RefreshRemoteVariableAsync(RemoteVariable variable, Session session)
+        {
+            if (variable?.NodeId == null || session == null) return;
+            try
+            {
+                var dv = await session.ReadValueAsync(variable.NodeId, System.Threading.CancellationToken.None);
+                if (dv != null) variable.UpdateFromDataValue(dv);
+            }
+            catch { }
+        }
+
+        private static long? TryExtractSuccessfulExecutionsCount(IDictionary<string, object?>? snapshot)
+        {
+            if (snapshot == null || snapshot.Count == 0) return null;
+            foreach (var kv in snapshot)
+            {
+                if (string.IsNullOrEmpty(kv.Key)) continue;
+                if (kv.Key.IndexOf("SuccessfulExecutionsCount", StringComparison.OrdinalIgnoreCase) < 0) continue;
+                if (TryConvertToInt64(kv.Value, out var value)) return value;
+            }
+            return null;
+        }
+
+        private static bool TryConvertToInt64(object? value, out long result)
+        {
+            switch (value)
+            {
+                case long l:
+                    result = l;
+                    return true;
+                case int i:
+                    result = i;
+                    return true;
+                case short s:
+                    result = s;
+                    return true;
+                case byte b:
+                    result = b;
+                    return true;
+                case sbyte sb:
+                    result = sb;
+                    return true;
+                case uint ui:
+                    result = Convert.ToInt64(ui, CultureInfo.InvariantCulture);
+                    return true;
+                case ushort us:
+                    result = us;
+                    return true;
+                case ulong ul when ul <= long.MaxValue:
+                    result = Convert.ToInt64(ul, CultureInfo.InvariantCulture);
+                    return true;
+                case float f when !float.IsNaN(f) && !float.IsInfinity(f):
+                    result = Convert.ToInt64(f, CultureInfo.InvariantCulture);
+                    return true;
+                case double d when !double.IsNaN(d) && !double.IsInfinity(d):
+                    result = Convert.ToInt64(d, CultureInfo.InvariantCulture);
+                    return true;
+                case decimal dec when dec <= long.MaxValue && dec >= long.MinValue:
+                    result = Convert.ToInt64(dec, CultureInfo.InvariantCulture);
+                    return true;
+                case string s when long.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed):
+                    result = parsed;
+                    return true;
+            }
+
+            try
+            {
+                if (value is IFormattable formattable)
+                {
+                    result = Convert.ToInt64(formattable, CultureInfo.InvariantCulture);
+                    return true;
+                }
+            }
+            catch { }
+
+            result = 0;
+            return false;
         }
 
         // Ensure core subscriptions are created and cached for future use

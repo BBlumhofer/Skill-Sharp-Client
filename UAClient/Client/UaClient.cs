@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using System.Collections.Generic;
+using System.Collections.Concurrent;
 using System.Threading.Tasks;
 using Opc.Ua;
 using Opc.Ua.Configuration;
@@ -13,6 +14,105 @@ namespace UAClient.Client
     /// </summary>
     public class UaClient : IDisposable
     {
+        // KeepAlive state per-session to implement grace periods
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<Session, KeepAliveState> _keepAliveState = new();
+
+        private class KeepAliveState
+        {
+            public DateTime LastGoodUtc { get; set; }
+            public DateTime LastWarnUtc { get; set; }
+            public StatusCode? LastWarnStatus { get; set; }
+            public bool WarningActive { get; set; }
+        }
+
+        private void AttachInternalKeepAlive(Session session)
+        {
+            if (session == null) return;
+
+            try
+            {
+                var sessionStartUtc = DateTime.UtcNow;
+                var trackedSession = session;
+
+                _keepAliveState[trackedSession] = new KeepAliveState
+                {
+                    LastGoodUtc = sessionStartUtc,
+                    LastWarnUtc = sessionStartUtc,
+                    LastWarnStatus = null,
+                    WarningActive = false
+                };
+
+                session.KeepAlive += async (s, e) =>
+                {
+                    try
+                    {
+                        var statusCode = e.Status?.StatusCode ?? StatusCodes.Bad;
+                        var statusStr = statusCode.ToString();
+                        var statusDetail = e.Status?.ToString() ?? statusStr;
+                        var grace = TimeSpan.FromSeconds(5);
+                        var warnCooldown = TimeSpan.FromSeconds(30);
+
+                        if (!_keepAliveState.TryGetValue(trackedSession, out var state))
+                        {
+                            state = new KeepAliveState
+                            {
+                                LastGoodUtc = sessionStartUtc,
+                                LastWarnUtc = sessionStartUtc,
+                                LastWarnStatus = null,
+                                WarningActive = false
+                            };
+                            _keepAliveState[trackedSession] = state;
+                        }
+
+                        if (StatusCode.IsBad(statusCode))
+                        {
+                            if (DateTime.UtcNow - state.LastGoodUtc < grace)
+                            {
+                                UAClient.Common.Log.Debug($"UaClient: KeepAlive reported bad status ({statusStr}) within grace ({grace.TotalSeconds}s); ignoring for now (at {e.CurrentTime})");
+                            }
+                            else
+                            {
+                                var now = DateTime.UtcNow;
+                                var shouldWarn = !state.WarningActive
+                                                 || now - state.LastWarnUtc >= warnCooldown
+                                                 || state.LastWarnStatus != statusCode;
+
+                                if (shouldWarn)
+                                {
+                                    UAClient.Common.Log.Warn($"UaClient: KeepAlive reported bad status ({statusDetail}) at {e.CurrentTime}; SDK reconnect handler will intervene if needed (next alert suppressed for {warnCooldown.TotalSeconds}s)");
+                                    state.WarningActive = true;
+                                    state.LastWarnUtc = now;
+                                    state.LastWarnStatus = statusCode;
+                                }
+                                else
+                                {
+                                    UAClient.Common.Log.Debug($"UaClient: KeepAlive still reporting bad status ({statusStr}); suppressing duplicate warning (cooldown active)");
+                                }
+                            }
+                        }
+                        else
+                        {
+                            state.LastGoodUtc = DateTime.UtcNow;
+                            state.WarningActive = false;
+                            state.LastWarnStatus = null;
+                            UAClient.Common.Log.Debug($"UaClient: KeepAlive status={statusStr} at {e.CurrentTime}");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        UAClient.Common.Log.Debug($"UaClient: KeepAlive handler threw: {ex}");
+                    }
+                };
+            }
+            catch { }
+        }
+
+        private void ClearKeepAliveState(Session session)
+        {
+            if (session == null) return;
+            _keepAliveState.TryRemove(session, out _);
+        }
+
         private readonly string _url;
         private readonly string _username;
         private readonly string _password;
@@ -227,6 +327,17 @@ namespace UAClient.Client
                     await sub.CreateAsync();
                 }
 
+                AttachInternalKeepAlive(session);
+
+                // Log created session details for diagnostics
+                try
+                {
+                    UAClient.Common.Log.Info($"UaClient: Session established: SessionId={session.SessionId}, Connected={session.Connected}");
+                    // small pause to allow session activation/initial server responses to settle before callers start browsing
+                    try { await System.Threading.Tasks.Task.Delay(200); } catch { }
+                }
+                catch { }
+
                 return session;
             }
 
@@ -234,12 +345,14 @@ namespace UAClient.Client
         {
             if (_session != null)
             {
+                var toDispose = _session;
                 try
                 {
-                    await _session.CloseAsync();
+                    await toDispose.CloseAsync();
                 }
                 catch { }
-                _session.Dispose();
+                toDispose.Dispose();
+                ClearKeepAliveState(toDispose);
                 _session = null;
             }
         }
@@ -247,6 +360,33 @@ namespace UAClient.Client
         public Session? Session => _session;
 
         public ApplicationConfiguration? Configuration => _config;
+
+        /// <summary>
+        /// Replace the internal Session instance. Used when a reconnect handler
+        /// provides a recreated session object and the client needs to swap it in.
+        /// </summary>
+        public void ReplaceSession(Session newSession)
+        {
+            if (newSession == null) throw new ArgumentNullException(nameof(newSession));
+
+            if (ReferenceEquals(_session, newSession))
+            {
+                AttachInternalKeepAlive(newSession);
+                return;
+            }
+
+            var oldSession = _session;
+            _session = newSession;
+
+            AttachInternalKeepAlive(newSession);
+
+            if (oldSession != null)
+            {
+                ClearKeepAliveState(oldSession);
+                try { oldSession.Close(); } catch { }
+                try { oldSession.Dispose(); } catch { }
+            }
+        }
 
         public async Task<object?> ReadNodeAsync(string nodeId)
         {

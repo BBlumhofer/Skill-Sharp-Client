@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -37,6 +37,11 @@ namespace UAClient.Client
         private CancellationTokenSource? _cts;
         private Task? _autoReconnectTask;
         private bool _firstConnection = true;
+        private bool _sdkReconnectEnabled = false;
+        private Opc.Ua.Client.SessionReconnectHandler? _reconnectHandler;
+        private readonly object _keepAliveSync = new();
+        private Session? _keepAliveSession;
+        private const int DefaultReconnectPeriodMs = SessionReconnectHandler.DefaultReconnectPeriod;
 
         public RemoteServer(UaClient client)
         {
@@ -53,6 +58,11 @@ namespace UAClient.Client
 
         public void AddSubscriber(IRemoteServerSubscriber s) => _subscribers.Add(s);
         public void RemoveSubscriber(IRemoteServerSubscriber s) => _subscribers.Remove(s);
+
+        private bool IsSdkReconnectActive =>
+            _sdkReconnectEnabled &&
+            _reconnectHandler != null &&
+            _reconnectHandler.State != SessionReconnectHandler.ReconnectState.Disposed;
 
         private void SetStatus(RemoteServerStatus s)
         {
@@ -107,6 +117,11 @@ namespace UAClient.Client
 
             _firstConnection = false;
             SetStatus(RemoteServerStatus.Connected);
+
+            if (session is Session sdkSession)
+            {
+                EnableSdkReconnect(sdkSession);
+            }
 
             // start auto reconnect checker
             _cts = new CancellationTokenSource();
@@ -323,25 +338,78 @@ namespace UAClient.Client
                 try
                 {
                     session = _client.Session;
+                    if (IsSdkReconnectActive && session != null)
+                    {
+                        await Task.Delay(TimeSpan.FromSeconds(1), token);
+                        continue;
+                    }
+                    try { UAClient.Common.Log.Debug($"RemoteServer: current session: SessionId={session?.SessionId}, Connected={session?.Connected.ToString() ?? "null"}"); } catch { }
                     if (session == null || !session.Connected)
                     {
+                        UAClient.Common.Log.Warn($"RemoteServer: detected disconnected session (session==null: {session==null}, connected: {session?.Connected.ToString() ?? "null"})");
                         // attempt reconnect
                         foreach (var sub in _subscribers) sub.OnConnectionLost();
                         SetStatus(RemoteServerStatus.Disconnected);
                         bool connected = false;
+                        var attempt = 0;
                         while (!connected && !token.IsCancellationRequested)
                         {
                             try
                             {
+                                attempt++;
+                                UAClient.Common.Log.Info($"RemoteServer: reconnect attempt #{attempt}");
                                 await _client.ConnectAsync();
                                 connected = true;
+                                UAClient.Common.Log.Info($"RemoteServer: reconnect succeeded on attempt #{attempt}");
                                 foreach (var sub in _subscribers) sub.OnConnectionEstablished();
                                 SetStatus(RemoteServerStatus.Connected);
+                                if (_client.Session is Session reconnectedSession)
+                                {
+                                    EnableSdkReconnect(reconnectedSession);
+                                }
                                 // re-browse on reconnect
                                 await IterateMachinesAsync(_client.Session!);
+                                try
+                                {
+                                    await DiscoverComponentsAsync(_client.Session!);
+                                }
+                                catch (Exception ex)
+                                {
+                                    UAClient.Common.Log.Warn($"RemoteServer: DiscoverComponentsAsync after reconnect failed: {ex.Message}");
+                                }
+
+                                try
+                                {
+                                    try { await _subscriptionManager.RebindSubscriptionsAsync(); } catch (Exception rex) { UAClient.Common.Log.Warn($"RemoteServer: RebindSubscriptionsAsync failed after reconnect: {rex.Message}"); }
+                                    await SetupAllSubscriptionsAsync();
+                                }
+                                catch (Exception ex)
+                                {
+                                    UAClient.Common.Log.Warn($"RemoteServer: SetupAllSubscriptionsAsync after reconnect failed: {ex.Message}");
+                                }
+
+                                try
+                                {
+                                    foreach (var module in _modules.Values)
+                                    {
+                                        try { await module.EnableAutoRecoveryAsync(); }
+                                        catch (Exception ex) { UAClient.Common.Log.Warn($"RemoteServer: EnableAutoRecoveryAsync failed for module {module.Name}: {ex.Message}"); }
+                                    }
+
+                                    foreach (var module in _modules.Values)
+                                    {
+                                        try { await module.EnsureRecoveryAsync("Reconnect"); }
+                                        catch (Exception ex) { UAClient.Common.Log.Warn($"RemoteServer: EnsureRecoveryAsync failed for module {module.Name}: {ex.Message}"); }
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    UAClient.Common.Log.Warn($"RemoteServer: recovery activation after reconnect encountered errors: {ex.Message}");
+                                }
                             }
-                            catch
+                            catch (Exception ex)
                             {
+                                UAClient.Common.Log.Warn($"RemoteServer: reconnect attempt #{attempt} failed: {ex.Message}");
                                 await Task.Delay(TimeSpan.FromSeconds(delaySeconds), token);
                             }
                         }
@@ -350,6 +418,164 @@ namespace UAClient.Client
                 catch { }
 
                 await Task.Delay(TimeSpan.FromSeconds(0.5), token);
+            }
+        }
+
+        private async Task RunPostReconnectRecoveryAsync(Session session, bool sessionReplaced)
+        {
+            try
+            {
+                UAClient.Common.Log.Info($"RemoteServer: running post-reconnect recovery (sessionReplaced={sessionReplaced})");
+
+                try { await IterateMachinesAsync(session); }
+                catch (Exception ex) { UAClient.Common.Log.Warn($"RemoteServer: IterateMachinesAsync after SDK reconnect failed: {ex.Message}"); }
+
+                try { await DiscoverComponentsAsync(session); }
+                catch (Exception ex) { UAClient.Common.Log.Warn($"RemoteServer: DiscoverComponentsAsync after SDK reconnect failed: {ex.Message}"); }
+
+                if (sessionReplaced)
+                {
+                    try { await _subscriptionManager.RebindSubscriptionsAsync(); }
+                    catch (Exception ex) { UAClient.Common.Log.Warn($"RemoteServer: RebindSubscriptionsAsync after SDK reconnect failed: {ex.Message}"); }
+                }
+
+                try { await SetupAllSubscriptionsAsync(); }
+                catch (Exception ex) { UAClient.Common.Log.Warn($"RemoteServer: SetupAllSubscriptionsAsync after SDK reconnect failed: {ex.Message}"); }
+
+                try
+                {
+                    foreach (var module in _modules.Values)
+                    {
+                        try { await module.EnableAutoRecoveryAsync(); }
+                        catch (Exception ex) { UAClient.Common.Log.Warn($"RemoteServer: EnableAutoRecoveryAsync failed for module {module.Name}: {ex.Message}"); }
+                    }
+
+                    foreach (var module in _modules.Values)
+                    {
+                        try { await module.EnsureRecoveryAsync("Reconnect"); }
+                        catch (Exception ex) { UAClient.Common.Log.Warn($"RemoteServer: EnsureRecoveryAsync failed for module {module.Name}: {ex.Message}"); }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    UAClient.Common.Log.Warn($"RemoteServer: post-reconnect recovery failed: {ex.Message}");
+                }
+            }
+            catch (Exception ex)
+            {
+                UAClient.Common.Log.Warn($"RemoteServer: RunPostReconnectRecoveryAsync error: {ex.Message}");
+            }
+        }
+
+        private void EnableSdkReconnect(Session session)
+        {
+            if (session == null) return;
+
+            lock (_keepAliveSync)
+            {
+                if (_keepAliveSession != null)
+                {
+                    try { _keepAliveSession.KeepAlive -= Session_KeepAlive; } catch { }
+                }
+                _keepAliveSession = session;
+                session.KeepAlive += Session_KeepAlive;
+            }
+
+            try
+            {
+                session.TransferSubscriptionsOnReconnect = true;
+                session.DeleteSubscriptionsOnClose = false;
+            }
+            catch { }
+
+            if (_reconnectHandler == null || _reconnectHandler.State == SessionReconnectHandler.ReconnectState.Disposed)
+            {
+                _reconnectHandler = new SessionReconnectHandler(reconnectAbort: true, maxReconnectPeriod: SessionReconnectHandler.MaxReconnectPeriod);
+            }
+
+            _sdkReconnectEnabled = true;
+        }
+
+        private void DetachKeepAliveHandler()
+        {
+            lock (_keepAliveSync)
+            {
+                if (_keepAliveSession != null)
+                {
+                    try { _keepAliveSession.KeepAlive -= Session_KeepAlive; } catch { }
+                    _keepAliveSession = null;
+                }
+            }
+        }
+
+        private void DisableSdkReconnect()
+        {
+            DetachKeepAliveHandler();
+            _sdkReconnectEnabled = false;
+            if (_reconnectHandler != null)
+            {
+                try { _reconnectHandler.Dispose(); } catch { }
+                _reconnectHandler = null;
+            }
+        }
+
+        private void Session_KeepAlive(ISession session, KeepAliveEventArgs e)
+        {
+            try
+            {
+                if (!IsSdkReconnectActive) return;
+                if (session is not Session sdkSession) return;
+                if (!ReferenceEquals(_keepAliveSession, sdkSession)) return;
+
+                if (ServiceResult.IsBad(e.Status))
+                {
+                    var state = _reconnectHandler?.BeginReconnect(sdkSession, DefaultReconnectPeriodMs, OnReconnectComplete);
+                    if (state == SessionReconnectHandler.ReconnectState.Triggered)
+                    {
+                        UAClient.Common.Log.Warn($"RemoteServer: KeepAlive bad status {e.Status}, reconnect scheduled.");
+                        e.CancelKeepAlive = true;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                UAClient.Common.Log.Warn($"RemoteServer: Session_KeepAlive error: {ex.Message}");
+            }
+        }
+
+        private void OnReconnectComplete(object? sender, EventArgs e)
+        {
+            if (!ReferenceEquals(sender, _reconnectHandler)) return;
+
+            try
+            {
+                var recoveredSession = _reconnectHandler?.Session as Session;
+                if (recoveredSession == null)
+                {
+                    UAClient.Common.Log.Info("RemoteServer: SessionReconnectHandler reported keepalive recovery.");
+                    return;
+                }
+
+                var currentSession = _client.Session as Session;
+                var replaced = currentSession == null || !ReferenceEquals(currentSession, recoveredSession);
+
+                if (replaced)
+                {
+                    UAClient.Common.Log.Info($"RemoteServer: SessionReconnectHandler provided new session: {recoveredSession.SessionId}");
+                    try { _client.ReplaceSession(recoveredSession); }
+                    catch (Exception rex) { UAClient.Common.Log.Warn($"RemoteServer: ReplaceSession failed: {rex.Message}"); }
+                    EnableSdkReconnect(recoveredSession);
+                }
+                else
+                {
+                    UAClient.Common.Log.Info($"RemoteServer: SessionReconnectHandler reactivated session: {recoveredSession.SessionId}");
+                }
+
+                _ = Task.Run(() => RunPostReconnectRecoveryAsync(recoveredSession, replaced));
+            }
+            catch (Exception ex)
+            {
+                UAClient.Common.Log.Warn($"RemoteServer: reconnect completion handler error: {ex.Message}");
             }
         }
 
@@ -394,8 +620,10 @@ namespace UAClient.Client
 
         public void Dispose()
         {
+            DisableSdkReconnect();
             try { _cts?.Cancel(); } catch { }
             _subscriptionManager.Dispose();
         }
     }
 }
+

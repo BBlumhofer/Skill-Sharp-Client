@@ -27,7 +27,7 @@ namespace UAClient.Tests
         {
             if (!ShouldRunIntegration) return;
 
-            var url = Environment.GetEnvironmentVariable("UA_TEST_SERVER") ?? "opc.tcp://localhost:4842";
+            var url = Environment.GetEnvironmentVariable("UA_TEST_SERVER") ?? "opc.tcp://172.24.100.85:4892";
             var username = Environment.GetEnvironmentVariable("UA_TEST_USER") ?? "orchestrator";
             var password = Environment.GetEnvironmentVariable("UA_TEST_PASS") ?? "orchestrator";
 
@@ -157,7 +157,7 @@ namespace UAClient.Tests
         {
             if (!ShouldRunIntegration) return;
 
-            var url = Environment.GetEnvironmentVariable("UA_TEST_SERVER") ?? "opc.tcp://localhost:4842";
+            var url = Environment.GetEnvironmentVariable("UA_TEST_SERVER") ?? "opc.tcp://172.24.100.85:4892";
             var username = Environment.GetEnvironmentVariable("UA_TEST_USER") ?? "orchestrator";
             var password = Environment.GetEnvironmentVariable("UA_TEST_PASS") ?? "orchestrator";
 
