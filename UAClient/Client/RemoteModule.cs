@@ -1357,9 +1357,69 @@ namespace UAClient.Client
             bool OwnedByUs(string ownerValue)
             {
                 if (string.IsNullOrEmpty(ownerValue)) return false;
+                ownerValue = ownerValue.Trim('"', '\'', ' ');
 
-                return (!string.IsNullOrEmpty(ourAppName) && ownerValue.IndexOf(ourAppName, StringComparison.OrdinalIgnoreCase) >= 0) ||
-                       (!string.IsNullOrEmpty(ourHostname) && ownerValue.IndexOf(ourHostname, StringComparison.OrdinalIgnoreCase) >= 0);
+                // 1) Match by application name, hostname or machine name
+                try
+                {
+                    if (!string.IsNullOrEmpty(ourAppName) && ownerValue.IndexOf(ourAppName, StringComparison.OrdinalIgnoreCase) >= 0) return true;
+                }
+                catch { }
+                try
+                {
+                    if (!string.IsNullOrEmpty(ourHostname) && ownerValue.IndexOf(ourHostname, StringComparison.OrdinalIgnoreCase) >= 0) return true;
+                }
+                catch { }
+                try
+                {
+                    var machine = Environment.MachineName;
+                    if (!string.IsNullOrEmpty(machine) && ownerValue.IndexOf(machine, StringComparison.OrdinalIgnoreCase) >= 0) return true;
+                }
+                catch { }
+
+                // 2) Correlation with Session diagnostics or client certificate was removed because
+                //    the client-side Session implementation used here does not expose the
+                //    SessionDiagnostics/ClientCertificate properties in a stable manner. Rely
+                //    on owner string comparisons, hostnames and IP matching instead.
+
+                // 3) Match IP addresses of this host (server often stores IP only)
+                try
+                {
+                    var hostEntry = System.Net.Dns.GetHostEntry(ourHostname);
+                    foreach (var addr in hostEntry.AddressList)
+                    {
+                        if (addr == null) continue;
+                        if (ownerValue.IndexOf(addr.ToString(), StringComparison.OrdinalIgnoreCase) >= 0) return true;
+                    }
+                }
+                catch { }
+
+                try
+                {
+                    var nics = System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces();
+                    foreach (var nic in nics)
+                    {
+                        var ipProps = nic.GetIPProperties();
+                        if (ipProps?.UnicastAddresses == null) continue;
+                        foreach (var uni in ipProps.UnicastAddresses)
+                        {
+                            var a = uni?.Address?.ToString();
+                            if (string.IsNullOrEmpty(a)) continue;
+                            if (ownerValue.IndexOf(a, StringComparison.OrdinalIgnoreCase) >= 0) return true;
+                        }
+                    }
+                }
+                catch { }
+
+                // 4) Loopback / localhost forms
+                if (ownerValue.IndexOf("127.0.0.1", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    ownerValue.IndexOf("::1", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    ownerValue.IndexOf("localhost", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return true;
+                }
+
+                return false;
             }
 
             UAClient.Common.Log.Info($"Locking module {Name} via lock {lockObj.Name}");
