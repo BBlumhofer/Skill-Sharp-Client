@@ -890,8 +890,7 @@ namespace UAClient.Client
             UAClient.Common.Log.Debug($"RemoteSkill '{Name}': calling Start method (methodId={methodId}) on BaseNodeId={BaseNodeId}");
             try
             {
-                var callRes = await session.CallAsync(BaseNodeId, methodId, System.Threading.CancellationToken.None, inputs);
-                // start call result (verbose debug suppressed)
+                await session.CallAsync(BaseNodeId, methodId, System.Threading.CancellationToken.None, inputs);
             }
             catch (Exception ex)
             {
@@ -938,8 +937,7 @@ namespace UAClient.Client
                 UAClient.Common.Log.Debug($"RemoteSkill '{Name}': Start did not change state, retrying Start on StateMachineNode={_stateMachineNode}");
                 try
                 {
-                    var callRes2 = await session.CallAsync(_stateMachineNode, methodId, System.Threading.CancellationToken.None, inputs);
-                    // start retry call result (verbose debug suppressed)
+                    await session.CallAsync(_stateMachineNode, methodId, System.Threading.CancellationToken.None, inputs);
 
                     // brief wait again
                     var ok = await WaitForStateWithSubscriptionAsync(Common.SkillStates.Running, TimeSpan.FromSeconds(2)) || await WaitForStateWithSubscriptionAsync(Common.SkillStates.Completed, TimeSpan.FromSeconds(2));
