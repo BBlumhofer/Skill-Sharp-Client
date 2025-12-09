@@ -1,40 +1,34 @@
 {
   "format": 1,
   "restore": {
-    "C:\\Users\\bebl01\\Repos\\CSharpEnv\\Skill-Sharp-Client\\Tools\\RemoteInspector\\RemoteInspector.csproj": {}
+    "/home/benjamin/AgentDevelopment/Skill-Sharp-Client/Tools/RemoteInspector/RemoteInspector.csproj": {}
   },
   "projects": {
-    "C:\\Users\\bebl01\\Repos\\CSharpEnv\\Skill-Sharp-Client\\Tools\\RemoteInspector\\RemoteInspector.csproj": {
+    "/home/benjamin/AgentDevelopment/Skill-Sharp-Client/Tools/RemoteInspector/RemoteInspector.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "C:\\Users\\bebl01\\Repos\\CSharpEnv\\Skill-Sharp-Client\\Tools\\RemoteInspector\\RemoteInspector.csproj",
+        "projectUniqueName": "/home/benjamin/AgentDevelopment/Skill-Sharp-Client/Tools/RemoteInspector/RemoteInspector.csproj",
         "projectName": "RemoteInspector",
-        "projectPath": "C:\\Users\\bebl01\\Repos\\CSharpEnv\\Skill-Sharp-Client\\Tools\\RemoteInspector\\RemoteInspector.csproj",
-        "packagesPath": "C:\\Users\\bebl01\\.nuget\\packages\\",
-        "outputPath": "C:\\Users\\bebl01\\Repos\\CSharpEnv\\Skill-Sharp-Client\\Tools\\RemoteInspector\\obj\\",
+        "projectPath": "/home/benjamin/AgentDevelopment/Skill-Sharp-Client/Tools/RemoteInspector/RemoteInspector.csproj",
+        "packagesPath": "/home/benjamin/.nuget/packages/",
+        "outputPath": "/home/benjamin/AgentDevelopment/Skill-Sharp-Client/Tools/RemoteInspector/obj/",
         "projectStyle": "PackageReference",
-        "fallbackFolders": [
-          "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"
-        ],
         "configFilePaths": [
-          "C:\\Users\\bebl01\\AppData\\Roaming\\NuGet\\NuGet.Config",
-          "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.FallbackLocation.config",
-          "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.Offline.config"
+          "/home/benjamin/.nuget/NuGet/NuGet.Config"
         ],
         "originalTargetFrameworks": [
           "net10.0"
         ],
         "sources": {
-          "C:\\Program Files (x86)\\Microsoft SDKs\\NuGetPackages\\": {},
-          "C:\\Program Files\\dotnet\\library-packs": {},
+          "/usr/lib/dotnet/library-packs": {},
           "https://api.nuget.org/v3/index.json": {}
         },
         "frameworks": {
           "net10.0": {
             "targetAlias": "net10.0",
             "projectReferences": {
-              "C:\\Users\\bebl01\\Repos\\CSharpEnv\\Skill-Sharp-Client\\UAClient\\UAClient.csproj": {
-                "projectPath": "C:\\Users\\bebl01\\Repos\\CSharpEnv\\Skill-Sharp-Client\\UAClient\\UAClient.csproj"
+              "/home/benjamin/AgentDevelopment/Skill-Sharp-Client/UAClient/UAClient.csproj": {
+                "projectPath": "/home/benjamin/AgentDevelopment/Skill-Sharp-Client/UAClient/UAClient.csproj"
               }
             }
           }
@@ -70,7 +64,7 @@
               "privateAssets": "all"
             }
           },
-          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.100/PortableRuntimeIdentifierGraph.json",
+          "runtimeIdentifierGraphPath": "/usr/lib/dotnet/sdk/10.0.100/PortableRuntimeIdentifierGraph.json",
           "packagesToPrune": {
             "Microsoft.CSharp": "(,4.7.32767]",
             "Microsoft.VisualBasic": "(,10.4.32767]",
@@ -348,29 +342,23 @@
         }
       }
     },
-    "C:\\Users\\bebl01\\Repos\\CSharpEnv\\Skill-Sharp-Client\\UAClient\\UAClient.csproj": {
+    "/home/benjamin/AgentDevelopment/Skill-Sharp-Client/UAClient/UAClient.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "C:\\Users\\bebl01\\Repos\\CSharpEnv\\Skill-Sharp-Client\\UAClient\\UAClient.csproj",
+        "projectUniqueName": "/home/benjamin/AgentDevelopment/Skill-Sharp-Client/UAClient/UAClient.csproj",
         "projectName": "SkillSharp.Client",
-        "projectPath": "C:\\Users\\bebl01\\Repos\\CSharpEnv\\Skill-Sharp-Client\\UAClient\\UAClient.csproj",
-        "packagesPath": "C:\\Users\\bebl01\\.nuget\\packages\\",
-        "outputPath": "C:\\Users\\bebl01\\Repos\\CSharpEnv\\Skill-Sharp-Client\\UAClient\\obj\\",
+        "projectPath": "/home/benjamin/AgentDevelopment/Skill-Sharp-Client/UAClient/UAClient.csproj",
+        "packagesPath": "/home/benjamin/.nuget/packages/",
+        "outputPath": "/home/benjamin/AgentDevelopment/Skill-Sharp-Client/UAClient/obj/",
         "projectStyle": "PackageReference",
-        "fallbackFolders": [
-          "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"
-        ],
         "configFilePaths": [
-          "C:\\Users\\bebl01\\AppData\\Roaming\\NuGet\\NuGet.Config",
-          "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.FallbackLocation.config",
-          "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.Offline.config"
+          "/home/benjamin/.nuget/NuGet/NuGet.Config"
         ],
         "originalTargetFrameworks": [
           "net10.0"
         ],
         "sources": {
-          "C:\\Program Files (x86)\\Microsoft SDKs\\NuGetPackages\\": {},
-          "C:\\Program Files\\dotnet\\library-packs": {},
+          "/usr/lib/dotnet/library-packs": {},
           "https://api.nuget.org/v3/index.json": {}
         },
         "frameworks": {
@@ -420,7 +408,7 @@
               "privateAssets": "all"
             }
           },
-          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.100/PortableRuntimeIdentifierGraph.json",
+          "runtimeIdentifierGraphPath": "/usr/lib/dotnet/sdk/10.0.100/PortableRuntimeIdentifierGraph.json",
           "packagesToPrune": {
             "Microsoft.CSharp": "(,4.7.32767]",
             "Microsoft.VisualBasic": "(,10.4.32767]",
