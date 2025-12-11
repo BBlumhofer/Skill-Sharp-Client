@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("RemoteInspector")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+930b172c6f7a21615a94d89d7e6461261bdd610f")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+55a8b04f83f614b78a26b35273a1abffa6af72d9")]
 [assembly: System.Reflection.AssemblyProductAttribute("RemoteInspector")]
 [assembly: System.Reflection.AssemblyTitleAttribute("RemoteInspector")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

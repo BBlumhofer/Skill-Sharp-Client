@@ -87,10 +87,10 @@ internal class Program
             }
 
             Console.WriteLine($"Module: {module.Name}");
-            var neigh = module.Neighbors ?? new System.Collections.Generic.List<string>();
+            var neigh = module.GetNeighborIds();
             Console.WriteLine(neigh.Count == 0
                 ? "Neighbors: (none reported)"
-                : $"Neighbors: {string.Join(", ", neigh)}");
+                : $"Neighbors (derived from partner tags): {string.Join(", ", neigh)}");
 
             // Ports overview (include all discovered ports, not just coupled neighbors)
             if (module.Ports == null || module.Ports.Count == 0)

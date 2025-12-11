@@ -79,6 +79,59 @@ namespace UAClient.Client
             return map;
         }
 
+        private static string? ExtractNeighborIdFromPartnerRfidTag(string? rawTag)
+        {
+            if (string.IsNullOrWhiteSpace(rawTag)) return null;
+            var trimmed = rawTag.Trim();
+            trimmed = trimmed.Trim('"', '\'').Trim();
+            if (string.IsNullOrEmpty(trimmed)) return null;
+
+            var gateIndex = trimmed.IndexOf("Gate", StringComparison.OrdinalIgnoreCase);
+            if (gateIndex < 0) return null;
+            var beforeGate = trimmed.Substring(0, gateIndex);
+            if (string.IsNullOrEmpty(beforeGate)) return null;
+
+            var lastUnderscore = beforeGate.LastIndexOf('_');
+            if (lastUnderscore <= 0) return null;
+            var secondLastUnderscore = beforeGate.LastIndexOf('_', lastUnderscore - 1);
+            if (secondLastUnderscore < 0) return null;
+
+            var candidate = beforeGate.Substring(secondLastUnderscore + 1, lastUnderscore - secondLastUnderscore - 1);
+            return string.IsNullOrWhiteSpace(candidate) ? null : candidate;
+        }
+
+        private void RefreshNeighborsFromPorts()
+        {
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var neighborIds = new List<string>();
+            foreach (var port in Ports.Values)
+            {
+                if (port == null) continue;
+                try
+                {
+                    var id = ExtractNeighborIdFromPartnerRfidTag(port.PartnerRfidTag);
+                    if (string.IsNullOrWhiteSpace(id) || !seen.Add(id)) continue;
+                    neighborIds.Add(id);
+                }
+                catch { }
+            }
+
+            lock (this)
+            {
+                Neighbors.Clear();
+                Neighbors.AddRange(neighborIds);
+            }
+        }
+
+        public IReadOnlyList<string> GetNeighborIds()
+        {
+            RefreshNeighborsFromPorts();
+            lock (this)
+            {
+                return new List<string>(Neighbors);
+            }
+        }
+
 
         public async Task EnableAutoRelockAsync()
         {
@@ -964,6 +1017,7 @@ namespace UAClient.Client
                 // await processing of this batch of children
                 try { await System.Threading.Tasks.Task.WhenAll(tasks); } catch { }
             }
+            RefreshNeighborsFromPorts();
         }
 
         public async System.Threading.Tasks.Task SetupSubscriptionsAsync(SubscriptionManager? subscriptionManager = null, bool createSubscriptions = true)
