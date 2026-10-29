@@ -89,6 +89,9 @@ Python-Client `opensmi-client @ e8740c2`. Abnahme: SPEC §12
 
 ## Not yet specified
 
+- Abgleich gegen die Beispielserver von opensmi-server (2026-10-29): `quick_start` (19 Objekte) und
+  `dictionary_entries` (15) sind identisch mit dem Python-Client. `rsl` startet wegen eines Server-Fehlers
+  nicht („Spatial object list was not initialized!“, `examples/rsl/main.py:44`); erneut prüfen, wenn upstream behoben.
 - Retry einzelner fehlgeschlagener Monitored Items (SPEC §7.1): bisher kein realistischer Auslöser
   gegen den Dummy-Server; erst ticketfähig, wenn ein echter Server das Problem zeigt.
 - `DisconnectAsync` ist nicht gegen gleichzeitige Aufrufe abgesichert (z. B. toter Server ohne
