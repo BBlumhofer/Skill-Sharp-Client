@@ -45,6 +45,29 @@ await skill.ResetAsync(wait: true);
 
 `DummySkill` braucht eine laufende `StartupSkill`. Wie man sie hochfährt, zeigt das Beispiel `example`.
 
+## Änderungen beobachten
+
+Zustand, Werte und Status lassen sich auf zwei Arten verfolgen. Events mit async Handlern:
+
+```csharp
+skill.StateChanged += async (sender, e) => await Console.Out.WriteLineAsync($"{((RemoteSkill)sender).Name}: {e.State}");
+```
+
+Die Handler laufen nacheinander in Anmeldereihenfolge auf der Benachrichtigungsschleife des Clients.
+Wirft einer, wird das geloggt und der nächste läuft trotzdem. Ein Handler sollte kurz sein und darf
+nicht auf eine spätere Benachrichtigung desselben Clients warten (z. B. `StartAsync(StartWait.Completion)`):
+Die kommt erst, wenn der Handler fertig ist, und das Warten läuft in den Timeout. Dafür gibt es die
+Streams und die `WaitFor…Async`-Methoden:
+
+```csharp
+await foreach (var state in skill.WatchStateAsync(cancellationToken))
+    if (state == SkillState.Completed) break;
+```
+
+`WatchStateAsync` (Skill), `WatchValueAsync` (Variable) und `WatchStatusAsync` (Server) liefern zuerst
+den aktuellen Wert, danach jede Änderung. Jeder Aufrufer hat einen kleinen Puffer; wer zu langsam liest,
+verliert die ältesten Werte, bekommt aber immer den neuesten.
+
 ## Beispiele
 
 Alle Python-Beispiele aus `opensmi-client/examples/` liegen in einem Konsolenprojekt. Der erste

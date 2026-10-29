@@ -76,6 +76,10 @@ Python-Client `opensmi-client @ e8740c2`. Abnahme: SPEC §12
 - [27 Best Practice Benachrichtigungen](issues/27-benachrichtigung-best-practice.md): Netzwerk-Clients
   (MQTTnet 4, RabbitMQ 7, Azure IoT v2, SignalR, NATS) nutzen async Events plus `IAsyncEnumerable` zum
   Warten; Rx ist kaum verbreitet. Empfohlen werden async Events, Watch-Streams und WaitFor.
+- [25 Benachrichtigungsmodell](issues/25-benachrichtigungsmodell.md): async Events (nacheinander),
+  Watch-Streams als `IAsyncEnumerable`, WaitFor bleibt; kein Rx; Unit-Enum in PascalCase. Umsetzung in 29.
+- [29 Benachrichtigungsmodell umgesetzt](issues/29-benachrichtigungsmodell-umsetzen.md): `AsyncEvents.cs`
+  (Delegate, EventArgs, serielles Raise, Watch-Puffer 8/DropOldest); `AsyncSignal` entfernt; Units in PascalCase.
 - [26 Unit-Enum](issues/26-unit-enum.md): 2133 Einheiten generiert aus opensmi-core
   (`tools/generate_units.py`), Python-Namen (`CENTIMETRE`), Helfer in `Units`, Abbildung per `eu.ToUnit()`.
 

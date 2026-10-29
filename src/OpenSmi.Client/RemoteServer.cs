@@ -42,8 +42,6 @@ public sealed class RemoteServer : IAsyncDisposable
         _options = options;
         LoggerFactory = options.LoggerFactory ?? NullLoggerFactory.Instance;
         Logger = LoggerFactory.CreateLogger<RemoteServer>();
-        StatusChanged = new(Logger);
-        TimeUpdated = new(Logger);
         BrowseRules = options.BrowseRules ?? [BrowseRule.Default];
     }
 
@@ -60,8 +58,14 @@ public sealed class RemoteServer : IAsyncDisposable
     /// <summary>Escape hatch to the raw OPC UA session (Python: <c>ua_client</c>).</summary>
     public ISession? Session { get; private set; }
 
-    public AsyncSignal<RemoteServerStatus> StatusChanged { get; }
-    public AsyncSignal<DateTime> TimeUpdated { get; }
+    public event AsyncEventHandler<ServerStatusChangedEventArgs>? StatusChanged;
+    /// <summary>Server_ServerStatus_CurrentTime ticks, usable as heartbeat.</summary>
+    public event AsyncEventHandler<ServerTimeUpdatedEventArgs>? TimeUpdated;
+    private readonly Watchers<RemoteServerStatus> _statusWatchers = new();
+
+    /// <summary>Yields <see cref="Status"/> first, then every change; a slow reader skips the oldest changes.</summary>
+    public IAsyncEnumerable<RemoteServerStatus> WatchStatusAsync(CancellationToken cancellationToken = default) =>
+        _statusWatchers.WatchAsync(() => Status, cancellationToken);
 
     public async Task<RemoteServer> ConnectAsync(ConnectRetryOptions? retry = null, CancellationToken cancellationToken = default)
     {
@@ -113,7 +117,7 @@ public sealed class RemoteServer : IAsyncDisposable
                 await BrowseMachinesAsync(cancellationToken).ConfigureAwait(false);
             }
             await Subscriptions.SubscribeDataChangeAsync(
-                [(VariableIds.Server_ServerStatus_CurrentTime, v => TimeUpdated.SendAsync(v.GetValue(DateTime.MinValue)))],
+                [(VariableIds.Server_ServerStatus_CurrentTime, v => TimeUpdated.RaiseAsync(this, new(v.GetValue(DateTime.MinValue)), Logger))],
                 cancellationToken).ConfigureAwait(false);
             await SetStatusAsync(RemoteServerStatus.Connected).ConfigureAwait(false);
             return this;
@@ -247,7 +251,7 @@ public sealed class RemoteServer : IAsyncDisposable
             || Status is not (RemoteServerStatus.Connected or RemoteServerStatus.Reconnecting)) return;
         e.CancelKeepAlive = true;
         _reconnect?.BeginReconnect(session, 1000, OnReconnected);
-        _ = SetStatusAsync(RemoteServerStatus.Reconnecting);
+        SetStatusFromSdk(RemoteServerStatus.Reconnecting);
     }
 
     /// <summary>A recreated session carries cloned subscriptions (with our handlers), so objects stay and only the session is swapped.</summary>
@@ -266,7 +270,7 @@ public sealed class RemoteServer : IAsyncDisposable
             Subscriptions.Rebind(session);
             old?.Dispose(); // not CloseAsync: that would delete the subscriptions on the server
         }
-        _ = SetStatusAsync(RemoteServerStatus.Connected);
+        SetStatusFromSdk(RemoteServerStatus.Connected);
     }
 
     private async Task TearDownAsync()
@@ -288,11 +292,25 @@ public sealed class RemoteServer : IAsyncDisposable
         }
     }
 
-    private Task SetStatusAsync(RemoteServerStatus status)
+    private Task SetStatusAsync(RemoteServerStatus status) => TrySetStatus(status) ? RaiseStatusAsync(status) : Task.CompletedTask;
+
+    /// <summary>From SDK callbacks: the status changes now, handlers run on the notification loop.</summary>
+    private void SetStatusFromSdk(RemoteServerStatus status)
     {
-        if (status == Status) return Task.CompletedTask;
+        if (TrySetStatus(status)) Subscriptions?.Post(() => RaiseStatusAsync(status));
+    }
+
+    private bool TrySetStatus(RemoteServerStatus status)
+    {
+        if (status == Status) return false;
         Status = status;
         Logger.LogInformation("New status {Status}", status);
-        return StatusChanged.SendAsync(status);
+        return true;
+    }
+
+    private Task RaiseStatusAsync(RemoteServerStatus status)
+    {
+        _statusWatchers.Publish(status);
+        return StatusChanged.RaiseAsync(this, new(status), Logger);
     }
 }

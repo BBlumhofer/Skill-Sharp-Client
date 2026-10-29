@@ -10,20 +10,20 @@ public static class SubscriptionComponentExample
             .ConnectAsync(cancellationToken: cancellationToken);
         var machine = server.Machines["DummyMachine"];
 
-        static Task OnNewMessage((BaseRemoteComponent Sender, NotificationEvent Event) a, CancellationToken _)
+        static Task OnNewMessage(object sender, NotificationReceivedEventArgs e)
         {
-            Console.WriteLine($"new message: {a.Sender.Name} {a.Event}");
+            Console.WriteLine($"new message: {((BaseRemoteComponent)sender).Name} {e.Notification}");
             return Task.CompletedTask;
         }
 
-        // subscribe to events by connecting async functions to signals:
-        machine.NotificationReceived.Connect(OnNewMessage);
-        machine.StatusChanged.Connect((a, _) =>
+        // subscribe to events with async handlers:
+        machine.NotificationReceived += OnNewMessage;
+        machine.StatusChanged += (sender, e) =>
         {
-            Console.WriteLine($"new status: {a.Sender.Name} '{a.State}' !");
+            Console.WriteLine($"new status: {((BaseRemoteComponent)sender).Name} '{e.State}' !");
             return Task.CompletedTask;
-        });
-        machine.Components["DummyComponent"].NotificationReceived.Connect(OnNewMessage);
+        };
+        machine.Components["DummyComponent"].NotificationReceived += OnNewMessage;
 
         await Task.Delay(duration ?? TimeSpan.FromSeconds(120), cancellationToken).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
     }

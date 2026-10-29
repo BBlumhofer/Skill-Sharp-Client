@@ -103,7 +103,6 @@ public sealed class RemoteSkill : RemoteCallable
         IReadOnlyList<BrowseRule>? browseRules) : base(name, nodeId, server, parent, browseRules)
     {
         _skillObject = skillObject;
-        StateChanged = new(Logger);
     }
 
     /// <summary>Cached, updated by subscription; initially Halted.</summary>
@@ -111,7 +110,12 @@ public sealed class RemoteSkill : RemoteCallable
     public bool IsSuspendable => _suspend != null;
     /// <summary>From the type of the skill object (FiniteSkillType vs. ContinuousSkillType).</summary>
     public bool IsFinite => UaType.StartsWith("finite", StringComparison.OrdinalIgnoreCase);
-    public AsyncSignal<(RemoteSkill Sender, SkillState State)> StateChanged { get; }
+    public event AsyncEventHandler<SkillStateChangedEventArgs>? StateChanged;
+    private readonly Watchers<SkillState> _stateWatchers = new();
+
+    /// <summary>Yields <see cref="CurrentState"/> first, then every change; a slow reader skips the oldest changes.</summary>
+    public IAsyncEnumerable<SkillState> WatchStateAsync(CancellationToken cancellationToken = default) =>
+        _stateWatchers.WatchAsync(() => CurrentState, cancellationToken);
 
     public Task StartAsync(StartWait wait = StartWait.None, TimeSpan? timeout = null, CancellationToken cancellationToken = default)
     {
@@ -220,6 +224,7 @@ public sealed class RemoteSkill : RemoteCallable
             _stateChanged.SetResult();
             _stateChanged = new(TaskCreationOptions.RunContinuationsAsynchronously);
         }
-        return StateChanged.SendAsync((this, state));
+        _stateWatchers.Publish(state);
+        return StateChanged.RaiseAsync(this, new(state), Logger);
     }
 }

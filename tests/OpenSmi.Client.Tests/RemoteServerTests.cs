@@ -8,7 +8,7 @@ public class RemoteServerTests
     {
         var server = new RemoteServer(ServerFixture.Options());
         var seen = new List<RemoteServerStatus>();
-        server.StatusChanged.Connect((s, _) => { lock (seen) seen.Add(s); return Task.CompletedTask; });
+        server.StatusChanged += (_, e) => { lock (seen) seen.Add(e.Status); return Task.CompletedTask; };
 
         await using (server)
         {
@@ -51,7 +51,7 @@ public class RemoteServerTests
     {
         await using var server = await ServerFixture.ConnectAsync(rules: []);
         var tick = new TaskCompletionSource<DateTime>();
-        server.TimeUpdated.Connect((t, _) => { tick.TrySetResult(t); return Task.CompletedTask; });
+        server.TimeUpdated += (_, e) => { tick.TrySetResult(e.Time); return Task.CompletedTask; };
         var time = await tick.Task.WaitAsync(TimeSpan.FromSeconds(3));
         Assert.True(Math.Abs((DateTime.UtcNow - time).TotalSeconds) < 30);
     }

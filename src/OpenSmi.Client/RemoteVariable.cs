@@ -10,7 +10,7 @@ public sealed class RemoteVariable : RemoteUaObject
     private static readonly IReadOnlyDictionary<string, string> NoValidValues = new Dictionary<string, string>();
 
     internal RemoteVariable(string name, NodeId nodeId, RemoteServer server, RemoteUaObject parent)
-        : base(name, nodeId, server, parent) => ValueChanged = new(Logger);
+        : base(name, nodeId, server, parent) { }
 
     /// <summary>Cached value, processed: <see cref="ValidValues"/> keys are mapped to their display names.</summary>
     public object? Value => Process(RawValue);
@@ -25,7 +25,12 @@ public sealed class RemoteVariable : RemoteUaObject
     public IReadOnlyDictionary<string, string> ValidValues { get; private set; } = NoValidValues;
     public EUInformation? Unit { get; private set; }
     public Opc.Ua.Range? Range { get; private set; }
-    public AsyncSignal<(RemoteVariable Sender, Variant Value)> ValueChanged { get; }
+    public event AsyncEventHandler<VariableValueChangedEventArgs>? ValueChanged;
+    private readonly Watchers<Variant> _valueWatchers = new();
+
+    /// <summary>Yields <see cref="RawValue"/> first, then every change; a slow reader skips the oldest changes.</summary>
+    public IAsyncEnumerable<Variant> WatchValueAsync(CancellationToken cancellationToken = default) =>
+        _valueWatchers.WatchAsync(() => RawValue, cancellationToken);
 
     private protected override async Task InitCoreAsync(CancellationToken ct)
     {
@@ -157,8 +162,12 @@ public sealed class RemoteVariable : RemoteUaObject
         return true;
     }
 
-    internal Task OnDataChangeAsync(DataValue dv) =>
-        Update(dv) ? ValueChanged.SendAsync((this, RawValue)) : Task.CompletedTask;
+    internal Task OnDataChangeAsync(DataValue dv)
+    {
+        if (!Update(dv)) return Task.CompletedTask;
+        _valueWatchers.Publish(RawValue);
+        return ValueChanged.RaiseAsync(this, new(RawValue), Logger);
+    }
 
     private async Task<DataValue> ReadDataValueAsync(CancellationToken ct)
     {

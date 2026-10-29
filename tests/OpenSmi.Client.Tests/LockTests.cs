@@ -32,11 +32,11 @@ public class LockTests
         await using var operatorServer = await ServerFixture.ConnectAsync("operator", LockOnly);
         var ownLock = orchestrator.Machines["DummyMachine"].Lock;
         var taken = new TaskCompletionSource();
-        ownLock.LockingUserChanged.Connect((a, _) =>
+        ownLock.LockingUserChanged += (_, e) =>
         {
-            if (a.User == "operator") taken.TrySetResult();
+            if (e.User == "operator") taken.TrySetResult();
             return Task.CompletedTask;
-        });
+        };
 
         await ownLock.InitLockAsync();
         Assert.Equal(LockResult.Ok, await operatorServer.Machines["DummyMachine"].Lock.BreakLockAsync()); // steals the lock

@@ -16,11 +16,11 @@ public static class ColdStartExample
         foreach (var (name, s) in machine.SkillSet) // iterate through available skills as demonstration
         {
             Console.WriteLine($"Skill '{name}' is in state '{s.CurrentState}'");
-            s.StateChanged.Connect((a, _) => // get notified of skill state changes
+            s.StateChanged += (sender, e) => // get notified of skill state changes
             {
-                Console.WriteLine($"Skill `{a.Sender.Name}` now in state `{a.State}`");
+                Console.WriteLine($"Skill `{((RemoteSkill)sender).Name}` now in state `{e.State}`");
                 return Task.CompletedTask;
-            });
+            };
         }
 
         // Step 1: acquire the lock of the machine

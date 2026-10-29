@@ -11,11 +11,10 @@ public sealed class RemoteUser : RemoteUaObject
     internal RemoteUser(string name, NodeId nodeId, RemoteServer server, RemoteMachine parent) : base(name, nodeId, server, parent)
     {
         Data = new(name, false, "", 0, false);
-        UserPresenceChanged = new(Logger);
     }
 
     public RemoteUserData Data { get; private set; }
-    public AsyncSignal<(RemoteUser Sender, bool IsPresent)> UserPresenceChanged { get; }
+    public event AsyncEventHandler<UserPresenceChangedEventArgs>? UserPresenceChanged;
 
     /// <summary><see cref="RemoteUserData.UserLevel"/> as number, <c>null</c> if not numeric.</summary>
     public int? LockPriority => int.TryParse(Data.UserLevel, out var p) ? p : null;
@@ -36,7 +35,7 @@ public sealed class RemoteUser : RemoteUaObject
         var present = dv.Value is true;
         if (present == Data.IsPresent) return Task.CompletedTask;
         Data = Data with { IsPresent = present };
-        return UserPresenceChanged.SendAsync((this, present));
+        return UserPresenceChanged.RaiseAsync(this, new(present), Logger);
     }
 
     public override string ToString() => $"{Name} (present: {Data.IsPresent}, level: {Data.UserLevel})";

@@ -11,11 +11,11 @@ public static class SubscriptionVariableExample
         var machine = server.Machines["DummyMachine"];
 
         foreach (var variable in machine.Components["DummyComponent"].Monitoring.Values)
-            variable.ValueChanged.Connect((a, _) =>
+            variable.ValueChanged += (sender, e) =>
             {
-                Console.WriteLine($"new value: {a.Sender.Path} = {a.Value.Value}");
+                Console.WriteLine($"new value: {((RemoteVariable)sender).Path} = {e.Value.Value}");
                 return Task.CompletedTask;
-            });
+            };
 
         await Task.Delay(duration ?? TimeSpan.FromSeconds(120), cancellationToken).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
     }

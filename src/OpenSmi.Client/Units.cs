@@ -10,7 +10,7 @@ public static partial class Units
 {
     private const string NamespaceUri = "http://www.opcfoundation.org/UA/units/un/cefact";
 
-    public static string Symbol(this Unit unit) => Symbols[unit];
+    public static string Symbol(this Unit unit) => Info[unit].Symbol;
 
     /// <exception cref="ArgumentException">Unknown unit id.</exception>
     public static Unit FromUaUnitId(int uaUnitId) => Enum.IsDefined(typeof(Unit), uaUnitId)
@@ -20,7 +20,7 @@ public static partial class Units
     /// <exception cref="ArgumentException">Unknown or ambiguous symbol.</exception>
     public static Unit FromSymbol(string symbol)
     {
-        var matches = Symbols.Where(kv => kv.Value == symbol).Select(kv => kv.Key).ToList();
+        var matches = Info.Where(kv => kv.Value.Symbol == symbol).Select(kv => kv.Key).ToList();
         return matches.Count switch
         {
             0 => throw new ArgumentException($"Unknown Unit symbol: {symbol}", nameof(symbol)),
@@ -30,8 +30,9 @@ public static partial class Units
         };
     }
 
+    /// <summary>The description is the opensmi-core name (e.g. <c>CENTIMETRE</c>), like Python.</summary>
     public static EUInformation ToEuInformation(this Unit unit) =>
-        new(unit.Symbol(), unit.ToString(), NamespaceUri) { UnitId = (int)unit };
+        new(unit.Symbol(), Info[unit].Name, NamespaceUri) { UnitId = (int)unit };
 
     /// <exception cref="ArgumentException">Unknown unit id.</exception>
     public static Unit ToUnit(this EUInformation euInformation) => FromUaUnitId(euInformation.UnitId);

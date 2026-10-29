@@ -21,12 +21,7 @@ public sealed class RemoteLock : RemoteUaObject
     private TimeSpan _renewRetryInterval = TimeSpan.FromSeconds(1);
     private long? _lastRenewDue;
 
-    internal RemoteLock(NodeId nodeId, RemoteServer server, BaseRemoteComponent parent) : base("Lock", nodeId, server, parent)
-    {
-        LockedChanged = new(Logger);
-        LockingUserChanged = new(Logger);
-        RenewDue = new(Logger);
-    }
+    internal RemoteLock(NodeId nodeId, RemoteServer server, BaseRemoteComponent parent) : base("Lock", nodeId, server, parent) { }
 
     public bool IsLocked { get; private set; }
     public string LockingUser { get; private set; } = "";
@@ -56,10 +51,9 @@ public sealed class RemoteLock : RemoteUaObject
         set => _renewRetryInterval = value > TimeSpan.Zero ? value : throw new ArgumentOutOfRangeException(nameof(value), "must be > 0");
     }
 
-    public AsyncSignal<(RemoteLock Sender, bool Locked)> LockedChanged { get; }
-    public AsyncSignal<(RemoteLock Sender, string User)> LockingUserChanged { get; }
-    /// <summary>Payload: remaining lock time in ms.</summary>
-    public AsyncSignal<(RemoteLock Sender, double RemainingMs)> RenewDue { get; }
+    public event AsyncEventHandler<LockedChangedEventArgs>? LockedChanged;
+    public event AsyncEventHandler<LockingUserChangedEventArgs>? LockingUserChanged;
+    public event AsyncEventHandler<RenewDueEventArgs>? RenewDue;
 
     public Task<LockResult> InitLockAsync(CancellationToken cancellationToken = default) => CallAsync(_initLock, cancellationToken);
     public Task<LockResult> BreakLockAsync(CancellationToken cancellationToken = default) => CallAsync(_breakLock, cancellationToken);
@@ -128,7 +122,7 @@ public sealed class RemoteLock : RemoteUaObject
         IsLocked = locked;
         LockedSince = locked ? Timestamp(dv) : null;
         if (!locked) RemainingLockTimeMs = null;
-        return LockedChanged.SendAsync((this, locked));
+        return LockedChanged.RaiseAsync(this, new(locked), Logger);
     }
 
     private Task OnLockingUserAsync(DataValue dv)
@@ -136,7 +130,7 @@ public sealed class RemoteLock : RemoteUaObject
         var user = dv.Value as string ?? "";
         if (user == LockingUser) return Task.CompletedTask;
         LockingUser = user;
-        return LockingUserChanged.SendAsync((this, user));
+        return LockingUserChanged.RaiseAsync(this, new(user), Logger);
     }
 
     private Task OnLockingClientAsync(DataValue dv)
@@ -163,7 +157,7 @@ public sealed class RemoteLock : RemoteUaObject
         var now = Stopwatch.GetTimestamp();
         if (_lastRenewDue is { } last && Stopwatch.GetElapsedTime(last, now) < RenewRetryInterval) return Task.CompletedTask;
         _lastRenewDue = now;
-        return RenewDue.SendAsync((this, remaining));
+        return RenewDue.RaiseAsync(this, new(remaining), Logger);
     }
 
     private static DateTime Timestamp(DataValue dv) => dv.ServerTimestamp == DateTime.MinValue ? DateTime.UtcNow : dv.ServerTimestamp;
@@ -188,8 +182,8 @@ public sealed class AutoLock(RemoteLock remoteLock, bool breakLock = false, Time
         if (_active == null)
         {
             _active = new CancellationTokenSource();
-            remoteLock.LockingUserChanged.Connect(OnLockingUserChangedAsync);
-            remoteLock.RenewDue.Connect(OnRenewDueAsync);
+            remoteLock.LockingUserChanged += OnLockingUserChangedAsync;
+            remoteLock.RenewDue += OnRenewDueAsync;
         }
         if (blocking) await LockOnceAsync(cancellationToken).ConfigureAwait(false);
         else _ = LockOnceAsync(CancellationToken.None);
@@ -198,8 +192,8 @@ public sealed class AutoLock(RemoteLock remoteLock, bool breakLock = false, Time
     public async Task UnlockAsync(CancellationToken cancellationToken = default)
     {
         if (_active == null) return;
-        remoteLock.LockingUserChanged.Disconnect(OnLockingUserChangedAsync);
-        remoteLock.RenewDue.Disconnect(OnRenewDueAsync);
+        remoteLock.LockingUserChanged -= OnLockingUserChangedAsync;
+        remoteLock.RenewDue -= OnRenewDueAsync;
         await _active.CancelAsync().ConfigureAwait(false);
         _active.Dispose();
         _active = null;
@@ -234,14 +228,14 @@ public sealed class AutoLock(RemoteLock remoteLock, bool breakLock = false, Time
         catch (OperationCanceledException) when (!ct.IsCancellationRequested) { } // UnlockAsync stopped us
     }
 
-    private Task OnLockingUserChangedAsync((RemoteLock, string User) args, CancellationToken ct)
+    private Task OnLockingUserChangedAsync(object sender, LockingUserChangedEventArgs args)
     {
         // Not awaited: the handler runs on the subscription dispatch loop, which delivers the lock updates.
         if (args.User != remoteLock.Server.Username) _ = LockOnceAsync(CancellationToken.None);
         return Task.CompletedTask;
     }
 
-    private Task OnRenewDueAsync((RemoteLock, double) _, CancellationToken __)
+    private Task OnRenewDueAsync(object sender, RenewDueEventArgs args)
     {
         if (_renew is { IsCompleted: false }) return Task.CompletedTask;
         _renew = Task.Run(async () =>

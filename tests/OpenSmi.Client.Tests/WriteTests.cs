@@ -11,7 +11,7 @@ public class WriteTests
         await machine.Lock.InitLockAsync();
         var variable = machine.ParameterSet["DummyFloatParameter"];
         var changed = new TaskCompletionSource<object?>();
-        variable.ValueChanged.Connect((a, _) => { changed.TrySetResult(a.Value.Value); return Task.CompletedTask; });
+        variable.ValueChanged += (_, e) => { changed.TrySetResult(e.Value.Value); return Task.CompletedTask; };
         var target = (double)variable.Value! == 2.0 ? 3 : 2;
 
         await variable.WriteValueAsync(target); // int into a Double variable

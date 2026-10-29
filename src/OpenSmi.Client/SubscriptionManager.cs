@@ -203,6 +203,9 @@ internal sealed class SubscriptionManager : IAsyncDisposable
         finally { _gate.Release(); }
     }
 
+    /// <summary>Runs <paramref name="work"/> on the dispatch loop, after the notifications queued so far.</summary>
+    public void Post(Func<Task> work) => _queue.Writer.TryWrite(work);
+
     private void Touch() => Interlocked.Exchange(ref _lastNotification, Environment.TickCount64);
 
     private void Enqueue<T>(Dictionary<NodeId, List<Func<T, Task>>> registry, NodeId node, T value)

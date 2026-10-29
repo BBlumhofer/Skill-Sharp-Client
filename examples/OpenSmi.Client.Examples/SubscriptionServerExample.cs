@@ -10,16 +10,16 @@ public static class SubscriptionServerExample
         // remember: do not commit the actual password to version control...
         await using var server = await new RemoteServer(new() { Url = url, Username = "visitor", Password = "visitor" })
             .ConnectAsync(cancellationToken: cancellationToken);
-        server.StatusChanged.Connect((status, _) =>
+        server.StatusChanged += (_, e) =>
         {
-            Console.WriteLine($"new status: {status}");
+            Console.WriteLine($"new status: {e.Status}");
             return Task.CompletedTask;
-        });
-        server.TimeUpdated.Connect((time, _) =>
+        };
+        server.TimeUpdated += (_, e) =>
         {
-            Console.WriteLine($"({timeUpdateCount++:000}) received server time: {time:O}");
+            Console.WriteLine($"({timeUpdateCount++:000}) received server time: {e.Time:O}");
             return Task.CompletedTask;
-        });
+        };
 
         Console.WriteLine("Press Ctrl+C to exit!");
         await Task.Delay(duration ?? Timeout.InfiniteTimeSpan, cancellationToken).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);

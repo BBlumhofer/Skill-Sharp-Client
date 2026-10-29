@@ -60,7 +60,7 @@ public class SkillTests
         await using var server = await ServerFixture.ConnectAsync();
         var skill = (await ReadyMachineAsync(server)).SkillSet["DummySkill"];
         var states = new List<SkillState>();
-        skill.StateChanged.Connect((a, _) => { lock (states) states.Add(a.State); return Task.CompletedTask; });
+        skill.StateChanged += (_, e) => { lock (states) states.Add(e.State); return Task.CompletedTask; };
 
         Assert.True(skill.IsFinite);
         await EnsureReadyAsync(skill);
@@ -72,16 +72,38 @@ public class SkillTests
     }
 
     [Fact]
+    public async Task Watch_state_sees_running_and_completed()
+    {
+        await using var server = await ServerFixture.ConnectAsync();
+        var skill = (await ReadyMachineAsync(server)).SkillSet["DummySkill"];
+        await EnsureReadyAsync(skill);
+        using var cts = new CancellationTokenSource(Timeout);
+        await using var watch = skill.WatchStateAsync(cts.Token).GetAsyncEnumerator();
+        Assert.True(await watch.MoveNextAsync());
+        Assert.Equal(SkillState.Ready, watch.Current);
+
+        await skill.StartAsync(cancellationToken: cts.Token);
+        var states = new List<SkillState>();
+        while (await watch.MoveNextAsync())
+        {
+            states.Add(watch.Current);
+            if (watch.Current == SkillState.Completed) break;
+        }
+
+        Assert.Contains(SkillState.Running, states);
+    }
+
+    [Fact]
     public async Task Skill_run_delivers_notifications()
     {
         await using var server = await ServerFixture.ConnectAsync();
         var machine = await ReadyMachineAsync(server);
         var received = new TaskCompletionSource<NotificationEvent>();
-        machine.NotificationReceived.Connect((a, _) =>
+        machine.NotificationReceived += (_, e) =>
         {
-            if (a.Event.Message.Contains("operation mode")) received.TrySetResult(a.Event); // dummy_skill.py:71
+            if (e.Notification.Message.Contains("operation mode")) received.TrySetResult(e.Notification); // dummy_skill.py:71
             return Task.CompletedTask;
-        });
+        };
         var skill = machine.SkillSet["DummySkill"];
         await EnsureReadyAsync(skill);
 

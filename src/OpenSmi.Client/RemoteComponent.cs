@@ -33,8 +33,6 @@ public abstract class BaseRemoteComponent : RemoteUaObject
         Monitoring = new(server, this);
         Attributes = new(server, this);
         ParameterSet = new(server, this);
-        StatusChanged = new(Logger);
-        NotificationReceived = new(Logger);
     }
 
     public IReadOnlyDictionary<string, RemoteSkill> SkillSet => _skillSet;
@@ -49,8 +47,8 @@ public abstract class BaseRemoteComponent : RemoteUaObject
     public ParameterSet ParameterSet { get; }
     /// <summary>Cached MachineryItemState text, "Unknown" until known.</summary>
     public string CurrentState { get; private set; } = "Unknown";
-    public AsyncSignal<(BaseRemoteComponent Sender, string State)> StatusChanged { get; }
-    public AsyncSignal<(BaseRemoteComponent Sender, NotificationEvent Event)> NotificationReceived { get; }
+    public event AsyncEventHandler<ComponentStatusChangedEventArgs>? StatusChanged;
+    public event AsyncEventHandler<NotificationReceivedEventArgs>? NotificationReceived;
 
     internal RemoteLock? LockOrNull { get; private set; }
     private NodeId? _currentStateNode;
@@ -178,7 +176,7 @@ public abstract class BaseRemoteComponent : RemoteUaObject
         var state = StateText(dv.Value);
         if (state == CurrentState) return Task.CompletedTask;
         CurrentState = state;
-        return StatusChanged.SendAsync((this, state));
+        return StatusChanged.RaiseAsync(this, new(state), Logger);
     }
 
     private Task OnEventAsync(EventFieldList fields)
@@ -191,7 +189,7 @@ public abstract class BaseRemoteComponent : RemoteUaObject
             Logger.LogWarning("Dropping event without message on {Path}", Path);
             return Task.CompletedTask;
         }
-        return NotificationReceived.SendAsync((this, notification));
+        return NotificationReceived.RaiseAsync(this, new(notification), Logger);
     }
 
     internal static string StateText(object? value) => value switch
