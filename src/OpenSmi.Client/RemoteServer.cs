@@ -38,6 +38,9 @@ public sealed class RemoteServer : IAsyncDisposable
     private Dictionary<string, RemoteMachine> _machines = [];
     private readonly List<Exception> _initExceptions = [];
     private SessionReconnectHandler? _reconnect;
+    private readonly object _disconnectGate = new();
+    private Task? _disconnect;
+    private readonly AsyncLocal<bool> _inDisconnect = new();
 
     public RemoteServer(RemoteServerOptions options)
     {
@@ -129,11 +132,23 @@ public sealed class RemoteServer : IAsyncDisposable
         }
     }
 
-    public async Task DisconnectAsync(CancellationToken cancellationToken = default)
+    /// <summary>Concurrent calls share one teardown; a StatusChanged handler inside that teardown returns at once.</summary>
+    public Task DisconnectAsync(CancellationToken cancellationToken = default)
     {
-        if (Status == RemoteServerStatus.Disconnected) return;
-        await SetStatusAsync(RemoteServerStatus.Disconnecting).ConfigureAwait(false);
-        await TearDownAsync().ConfigureAwait(false);
+        if (_inDisconnect.Value) return Task.CompletedTask; // a handler cannot wait for the teardown that awaits it
+        lock (_disconnectGate)
+        {
+            if (Status == RemoteServerStatus.Disconnected) return Task.CompletedTask;
+            if (_disconnect is not { IsCompleted: false })
+                _disconnect = Task.Run(async () =>
+                {
+                    _inDisconnect.Value = true;
+                    await SetStatusAsync(RemoteServerStatus.Disconnecting).ConfigureAwait(false);
+                    _inDisconnect.Value = false; // not into whatever a Disconnected handler starts
+                    await TearDownAsync().ConfigureAwait(false);
+                });
+            return _disconnect;
+        }
     }
 
     public ValueTask DisposeAsync() => new(DisconnectAsync());

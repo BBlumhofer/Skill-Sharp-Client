@@ -86,6 +86,8 @@ Python-Client `opensmi-client @ e8740c2`. Abnahme: SPEC §12
   → `Disconnected`, kurzer Netzabbruch per TcpProxy getestet. Item-Retry übersprungen (nicht ehrlich testbar).
 - [30 Custom-Datentypen](issues/30-custom-datentypen.md): Enum-DataTypes über `DataTypeDefinition`
   (ohne ComplexTypes-Paket); `Value` = Membername, Schreiben per Name oder Zahl; Test mit eigenem Testtyp.
+- [31 Disconnect absichern](issues/31-disconnect-absichern.md): gleichzeitige `DisconnectAsync` teilen
+  einen Abbau; ein Aufruf aus dem `Disconnecting`-Handler kehrt sofort zurück.
 - [32 CI](issues/32-ci.md): GitHub Actions auf Linux, opensmi-server fest auf main 29e4d4a; noch nie gelaufen.
 - [29 Benachrichtigungsmodell umgesetzt](issues/29-benachrichtigungsmodell-umsetzen.md): `AsyncEvents.cs`
   (Delegate, EventArgs, serielles Raise, Watch-Puffer 8/DropOldest); `AsyncSignal` entfernt; Units in PascalCase.
@@ -100,8 +102,6 @@ Python-Client `opensmi-client @ e8740c2`. Abnahme: SPEC §12
   Python und C# liefern dieselben 19 Objekte.
 - Retry einzelner fehlgeschlagener Monitored Items (SPEC §7.1): bisher kein realistischer Auslöser
   gegen den Dummy-Server; erst ticketfähig, wenn ein echter Server das Problem zeigt.
-- `DisconnectAsync` ist nicht gegen gleichzeitige Aufrufe abgesichert (z. B. toter Server ohne
-  AutoReconnect und gleichzeitiger Nutzer-Disconnect).
 - Release 0.1.0, NuGet und Repo-Umbenennung: warten auf die Frage, ob SmartFactory-KL den Client aufnimmt.
 
 ## Out of scope

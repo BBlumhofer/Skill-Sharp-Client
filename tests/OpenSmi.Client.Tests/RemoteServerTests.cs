@@ -24,6 +24,40 @@ public class RemoteServerTests
     }
 
     [Fact]
+    public async Task Concurrent_disconnects_tear_down_once_and_the_instance_reconnects()
+    {
+        var server = await ServerFixture.ConnectAsync(rules: []);
+        var seen = new List<RemoteServerStatus>();
+        server.StatusChanged += async (_, e) =>
+        {
+            lock (seen) seen.Add(e.Status);
+            if (e.Status == RemoteServerStatus.Disconnecting)
+            {
+                await server.DisconnectAsync(); // re-entrant call must not wait for itself
+                await Task.Delay(200); // keeps the teardown open while the other callers arrive
+                lock (seen) seen.Add(RemoteServerStatus.Disconnecting); // marks the handler's end: no second teardown may overtake it
+            }
+        };
+
+        var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var calls = Enumerable.Range(0, 5).Select(_ => Task.Run(async () =>
+        {
+            await start.Task;
+            await server.DisconnectAsync();
+            return server.Status;
+        })).ToList();
+        start.SetResult();
+
+        Assert.All(await Task.WhenAll(calls).WaitAsync(TimeSpan.FromSeconds(30)), s => Assert.Equal(RemoteServerStatus.Disconnected, s));
+        Assert.Equal([RemoteServerStatus.Disconnecting, RemoteServerStatus.Disconnecting, RemoteServerStatus.Disconnected], seen);
+
+        await server.ConnectAsync();
+        Assert.Equal(RemoteServerStatus.Connected, server.Status);
+        await server.DisconnectAsync().WaitAsync(TimeSpan.FromSeconds(30));
+        Assert.Equal(RemoteServerStatus.Disconnected, server.Status);
+    }
+
+    [Fact]
     public async Task Wrong_password_fails_without_retry()
     {
         var server = new RemoteServer(ServerFixture.Options() with { Password = "wrong" });
