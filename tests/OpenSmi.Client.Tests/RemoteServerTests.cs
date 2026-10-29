@@ -47,6 +47,16 @@ public class RemoteServerTests
     }
 
     [Fact]
+    public async Task Watchdog_interval_sets_the_keep_alive_period_default_one_second()
+    {
+        await using (var byDefault = await ServerFixture.ConnectAsync(rules: []))
+            Assert.Equal(1000, byDefault.Session!.KeepAliveInterval);
+        await using var custom = await new RemoteServer(ServerFixture.Options(rules: []) with
+            { WatchdogInterval = TimeSpan.FromMilliseconds(500), AutoReconnect = false }).ConnectAsync();
+        Assert.Equal(500, custom.Session!.KeepAliveInterval);
+    }
+
+    [Fact]
     public async Task Time_updated_fires_as_heartbeat()
     {
         await using var server = await ServerFixture.ConnectAsync(rules: []);

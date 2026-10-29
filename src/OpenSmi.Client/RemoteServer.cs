@@ -12,6 +12,8 @@ public sealed record RemoteServerOptions
     public required string Password { get; init; }
     public string ApplicationUri { get; init; } = $"urn:uuid:{Guid.NewGuid()}";
     public TimeSpan RequestTimeout { get; init; } = TimeSpan.FromSeconds(10);
+    /// <summary>Period of the session keep-alive; a dead server is noticed after about this plus one second.</summary>
+    public TimeSpan WatchdogInterval { get; init; } = TimeSpan.FromSeconds(1);
     public SecurityOptions Security { get; init; } = SecurityOptions.None;
     /// <summary><c>null</c> browses everything, an empty list browses nothing.</summary>
     public IReadOnlyList<BrowseRule>? BrowseRules { get; init; }
@@ -82,11 +84,9 @@ public sealed class RemoteServer : IAsyncDisposable
                 {
                     Session = await CreateSessionAsync(cancellationToken).ConfigureAwait(false);
                     if (_options.AutoReconnect)
-                    {
                         _reconnect = new SessionReconnectHandler(true, (int)_options.ReconnectMaxDelay.TotalMilliseconds);
-                        Session.KeepAliveInterval = 2000; // detects a dead server after ~3-5 s
-                        Session.KeepAlive += OnKeepAlive;
-                    }
+                    Session.KeepAliveInterval = (int)_options.WatchdogInterval.TotalMilliseconds;
+                    Session.KeepAlive += OnKeepAlive;
                     break;
                 }
                 catch (ServiceResultException e) when (e.StatusCode is StatusCodes.BadUserAccessDenied or StatusCodes.BadIdentityTokenInvalid)
@@ -250,7 +250,13 @@ public sealed class RemoteServer : IAsyncDisposable
         if (!ReferenceEquals(session, Session) || !ServiceResult.IsBad(e.Status)
             || Status is not (RemoteServerStatus.Connected or RemoteServerStatus.Reconnecting)) return;
         e.CancelKeepAlive = true;
-        _reconnect?.BeginReconnect(session, 1000, OnReconnected);
+        if (_reconnect == null)
+        {
+            // No reconnect wanted: clean up like a user disconnect, but not on the SDK keep-alive thread.
+            if (Status == RemoteServerStatus.Connected) _ = Task.Run(() => DisconnectAsync());
+            return;
+        }
+        _reconnect.BeginReconnect(session, 1000, OnReconnected);
         SetStatusFromSdk(RemoteServerStatus.Reconnecting);
     }
 

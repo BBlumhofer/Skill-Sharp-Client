@@ -1,7 +1,7 @@
 # 24 Multi-Target net8.0 und net10.0
 
 Type: task
-Status: open
+Status: open (blockiert: Pakete für net8.0 fehlen offline)
 Blocked by: 29
 
 ## Question

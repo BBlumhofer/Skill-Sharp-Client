@@ -78,6 +78,8 @@ Python-Client `opensmi-client @ e8740c2`. Abnahme: SPEC §12
   Warten; Rx ist kaum verbreitet. Empfohlen werden async Events, Watch-Streams und WaitFor.
 - [25 Benachrichtigungsmodell](issues/25-benachrichtigungsmodell.md): async Events (nacheinander),
   Watch-Streams als `IAsyncEnumerable`, WaitFor bleibt; kein Rx; Unit-Enum in PascalCase. Umsetzung in 29.
+- [28 Reconnect-Reste](issues/28-reconnect-reste.md): `WatchdogInterval` (1 s), ohne AutoReconnect
+  → `Disconnected`, kurzer Netzabbruch per TcpProxy getestet. Item-Retry übersprungen (nicht ehrlich testbar).
 - [29 Benachrichtigungsmodell umgesetzt](issues/29-benachrichtigungsmodell-umsetzen.md): `AsyncEvents.cs`
   (Delegate, EventArgs, serielles Raise, Watch-Puffer 8/DropOldest); `AsyncSignal` entfernt; Units in PascalCase.
 - [26 Unit-Enum](issues/26-unit-enum.md): 2133 Einheiten generiert aus opensmi-core
@@ -85,6 +87,10 @@ Python-Client `opensmi-client @ e8740c2`. Abnahme: SPEC §12
 
 ## Not yet specified
 
+- Retry einzelner fehlgeschlagener Monitored Items (SPEC §7.1): bisher kein realistischer Auslöser
+  gegen den Dummy-Server; erst ticketfähig, wenn ein echter Server das Problem zeigt.
+- `DisconnectAsync` ist nicht gegen gleichzeitige Aufrufe abgesichert (z. B. toter Server ohne
+  AutoReconnect und gleichzeitiger Nutzer-Disconnect).
 - CI (GitHub Actions mit Python-Server unter Windows/Linux) erst nach dem Git-Repair (Ticket 04).
 - Release 0.1.0, Archivierung `legacy/`, NuGet (P7).
 
