@@ -27,7 +27,9 @@ public sealed partial class TestServer : IAsyncDisposable
     public RemoteServerOptions Options(string user = "orchestrator") =>
         new() { Url = Url, Username = user, Password = user };
 
-    public static async Task<TestServer> StartAsync(int port, bool encryption = false)
+    /// <param name="customTypes">Adds the custom enum DataType <c>TestColor</c> (Red, Green, Blue) as
+    /// <c>DummyComponent.ParameterSet.DummyEnumParameter</c> (initially Green, writable without lock).</param>
+    public static async Task<TestServer> StartAsync(int port, bool encryption = false, bool customTypes = false)
     {
         var dir = Directory.CreateTempSubdirectory("opensmi-server-").FullName;
         foreach (var file in Directory.GetFiles(SourceDir()))
@@ -37,10 +39,32 @@ public sealed partial class TestServer : IAsyncDisposable
         toml = EndpointPort().Replace(toml, $":{port}/server\"");
         toml = Encryption().Replace(toml, $"encryption = {(encryption ? "true" : "false")}");
         File.WriteAllText(config, toml);
+        if (customTypes) AddCustomTypes(dir);
 
         var server = new TestServer(port, dir);
         await server.StartAgainAsync();
         return server;
+    }
+
+    private static void AddCustomTypes(string dir)
+    {
+        File.WriteAllText(Path.Combine(dir, "custom_types.py"), """
+            from enum import IntEnum
+
+
+            class TestColor(IntEnum):
+                Red = 0
+                Green = 1
+                Blue = 2
+
+            """);
+        var component = Path.Combine(dir, "dummy_component.py");
+        var source = File.ReadAllText(component);
+        const string anchor = "    DummyIntListParameter = UaVariable(initial_value=[42, 84])";
+        if (!source.Contains(anchor)) throw new InvalidOperationException("dummy_component.py changed, cannot add custom types");
+        source = "from custom_types import TestColor" + Environment.NewLine + source.Replace(anchor,
+            anchor + Environment.NewLine + "    DummyEnumParameter = UaVariable(initial_value=TestColor.Green, bypass_lock=True)");
+        File.WriteAllText(component, source);
     }
 
     public async Task StartAgainAsync()

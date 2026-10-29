@@ -39,6 +39,8 @@ Python-Client `opensmi-client @ e8740c2`. Abnahme: SPEC §12
   `SkillExecution`. Wie Python wird nur `SkillExecution` gelesen, die Suche an zwei Stellen entfällt.
 - [02 Testserver lokal startbar](issues/02-testserver-lokal.md): Ja, Python 3.12 und
   opensmi-server sind editable installiert, Endpoint `/server` auf Port 4843.
+- [04 Repo-Reparatur](issues/04-repo-reparatur-und-zugangsdaten.md): `.git` neu aus origin, Branch
+  `opensmi-port`; die Passwörter sind nur Testzugänge.
 - [05 Skelett](issues/05-skelett-und-server-fixture.md): ein Testprojekt, die Fixture nutzt einen
   laufenden Server mit. Der Altcode liegt in `legacy/`.
 - [06 RemoteServer](issues/06-remote-server-connect.md): `DefaultSessionFactory` ohne Reflection,
@@ -82,6 +84,9 @@ Python-Client `opensmi-client @ e8740c2`. Abnahme: SPEC §12
   Watch-Streams als `IAsyncEnumerable`, WaitFor bleibt; kein Rx; Unit-Enum in PascalCase. Umsetzung in 29.
 - [28 Reconnect-Reste](issues/28-reconnect-reste.md): `WatchdogInterval` (1 s), ohne AutoReconnect
   → `Disconnected`, kurzer Netzabbruch per TcpProxy getestet. Item-Retry übersprungen (nicht ehrlich testbar).
+- [30 Custom-Datentypen](issues/30-custom-datentypen.md): Enum-DataTypes über `DataTypeDefinition`
+  (ohne ComplexTypes-Paket); `Value` = Membername, Schreiben per Name oder Zahl; Test mit eigenem Testtyp.
+- [32 CI](issues/32-ci.md): GitHub Actions auf Linux, opensmi-server fest auf main 29e4d4a; noch nie gelaufen.
 - [29 Benachrichtigungsmodell umgesetzt](issues/29-benachrichtigungsmodell-umsetzen.md): `AsyncEvents.cs`
   (Delegate, EventArgs, serielles Raise, Watch-Puffer 8/DropOldest); `AsyncSignal` entfernt; Units in PascalCase.
 - [26 Unit-Enum](issues/26-unit-enum.md): 2133 Einheiten generiert aus opensmi-core
@@ -91,13 +96,13 @@ Python-Client `opensmi-client @ e8740c2`. Abnahme: SPEC §12
 
 - Abgleich gegen die Beispielserver von opensmi-server (2026-10-29): `quick_start` (19 Objekte) und
   `dictionary_entries` (15) sind identisch mit dem Python-Client. `rsl` startet wegen eines Server-Fehlers
-  nicht („Spatial object list was not initialized!“, `examples/rsl/main.py:44`); erneut prüfen, wenn upstream behoben.
+  nicht auf dem lokalen Feature-Branch 547ce5b; auf opensmi-server `main` (29e4d4a) läuft `rsl`, und
+  Python und C# liefern dieselben 19 Objekte.
 - Retry einzelner fehlgeschlagener Monitored Items (SPEC §7.1): bisher kein realistischer Auslöser
   gegen den Dummy-Server; erst ticketfähig, wenn ein echter Server das Problem zeigt.
 - `DisconnectAsync` ist nicht gegen gleichzeitige Aufrufe abgesichert (z. B. toter Server ohne
   AutoReconnect und gleichzeitiger Nutzer-Disconnect).
-- CI (GitHub Actions mit Python-Server unter Windows/Linux) erst nach dem Git-Repair (Ticket 04).
-- Release 0.1.0, Archivierung `legacy/`, NuGet (P7).
+- Release 0.1.0, NuGet und Repo-Umbenennung: warten auf die Frage, ob SmartFactory-KL den Client aufnimmt.
 
 ## Out of scope
 

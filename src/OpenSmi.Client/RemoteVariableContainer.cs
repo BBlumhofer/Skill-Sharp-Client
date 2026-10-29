@@ -54,7 +54,7 @@ public abstract class RemoteVariableContainer : RemoteUaObject, IReadOnlyDiction
         var vars = values.Keys.Select(k => this[k]).ToList();
         var writes = new WriteValueCollection(vars.Select(v => v.ToWriteValue(values[v.Name])));
         var response = await Session.WriteAsync(null, writes, cancellationToken).ConfigureAwait(false);
-        // Rejected values go through the single write: ValidValues fallback and precise exceptions.
+        // Rejected values go through the single write for precise exceptions.
         for (var i = 0; i < vars.Count; i++)
             if (StatusCode.IsBad(response.Results[i]))
                 await vars[i].WriteValueAsync(values[vars[i].Name], cancellationToken).ConfigureAwait(false);

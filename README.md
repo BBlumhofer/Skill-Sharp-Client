@@ -119,6 +119,8 @@ sind Python 3.12 mit installiertem `opensmi-server` und dessen Beispielordner `e
 Einige Testklassen (Beispiele, Security, Neustart) starten eigene Server auf festen Ports in
 eigenen Temp-Verzeichnissen.
 
+CI: `.github/workflows/ci.yml` führt die Tests bei Push und PR auf Ubuntu aus (.NET 8 und 10, opensmi-server auf festem Commit).
+
 ## Dokumentation
 
 - [docs/opensmi/SPEC.md](docs/opensmi/SPEC.md): Spezifikation und Abnahmekriterien

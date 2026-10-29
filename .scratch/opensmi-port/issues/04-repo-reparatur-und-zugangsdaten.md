@@ -1,7 +1,7 @@
 # 04 Git-Repo reparieren, Zugangsdaten entschärfen
 
 Type: task
-Status: open (HITL, Rest: Commit + Passwörter)
+Status: resolved
 Blocked by: –
 
 ## Question
@@ -27,3 +27,6 @@ Stand 2026-10-29 (vom Agenten auf Wunsch des Nutzers erledigt):
   neuer Branch `opensmi-port`, noch nichts committet (Agenten arbeiten noch).
 - Offen: der erste Commit auf `opensmi-port`, sobald 19/21/23 fertig sind; Prüfung und Rotation der
   Passwörter `visitor`/`orchestrator` in der SmartFactory (Mensch).
+
+**Nachtrag 2026-10-29:** Laut Nutzer sind `visitor`/`orchestrator` nur Testzugänge des
+Dummy-Servers; nichts zu rotieren, die Historie bleibt. Der Branch `opensmi-port` ist committet.

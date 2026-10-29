@@ -47,7 +47,7 @@ siehe §10.
 | Asynchronität | `async def` | `Task`/`ValueTask`, jede öffentliche I/O-Methode hat einen `CancellationToken cancellationToken = default` als letzten Parameter |
 | Timeouts | `asyncio.timeout()` beim Aufrufer | über `CancellationToken`. Zusätzlich `TimeSpan? timeout` auf `Wait*`-Methoden, weil die Python-Waits ohne Timeout hängen können [OI §5] |
 | Lebenszyklus | `await obj.init()`, `RemoteServer` als `async with` | `InitAsync(ct)` (idempotent), `RemoteServer : IAsyncDisposable` (`await using`) |
-| Signals | `Signal[P]` mit async-Callbacks, `gather` | `AsyncSignal<T>` mit `Connect(Func<T, CancellationToken, Task>)`/`Disconnect`. Handler laufen nebenläufig, Ausnahmen werden geloggt und nicht an den Sender propagiert (wie im SubscriptionManager [OI §2.18]) |
+| Signals | `Signal[P]` mit async-Callbacks, `gather` | `event AsyncEventHandler<XxxEventArgs>` (Handler geben `Task` zurück), dazu `Watch…Async(ct)` als `IAsyncEnumerable` und die `WaitFor…Async`-Methoden. Handler laufen nacheinander aus der seriellen Dispatch-Schleife, Ausnahmen werden pro Handler geloggt. Entscheidung: Ticket 25/27 in `.scratch/opensmi-port` |
 | Logging | structlog | `ILogger<T>` über `ILoggerFactory` im `RemoteServerOptions`, Standard `NullLoggerFactory` |
 | Fehler | asyncua-Exceptions plus `OpenSmiError` | eigene Hierarchie (§8). OPC-UA-Statusfehler als `OpenSmiStatusException` mit `StatusCode`, keine rohen SDK-Exceptions an der Oberfläche |
 | Collections | `dict[str, X]` | `IReadOnlyDictionary<string, X>`, case-sensitive wie BrowseNames. Schreibzugriff nur intern, thread-safe aufgebaut |
@@ -91,8 +91,9 @@ public sealed class RemoteServer : IAsyncDisposable
     public IReadOnlyList<Exception> InitExceptions { get; }     // §8.2
     public ISession? Session { get; }                           // Escape-Hatch, entspricht ua_client
 
-    public AsyncSignal<RemoteServerStatus> StatusChanged { get; }
-    public AsyncSignal<DateTime> TimeUpdated { get; }
+    public event AsyncEventHandler<ServerStatusChangedEventArgs>? StatusChanged;
+    public event AsyncEventHandler<ServerTimeUpdatedEventArgs>? TimeUpdated;
+    public IAsyncEnumerable<RemoteServerStatus> WatchStatusAsync(CancellationToken ct = default);
 
     public RemoteUaObject? GetUaObject(NodeId nodeId);
     public ushort GetNamespaceIndex(string namespaceUri);       // KeyNotFoundException
@@ -137,8 +138,8 @@ public abstract class BaseRemoteComponent : RemoteUaObject
     public string CurrentState { get; }                       // MachineryItemState, Default "Unknown"
     public MachineryItemState? CurrentStateEnum { get; }      // zusätzlich typisiert (Core-Enum)
     public Task<string> ReadCurrentStateAsync(CancellationToken ct = default);
-    public AsyncSignal<(BaseRemoteComponent Sender, string State)> StatusChanged { get; }
-    public AsyncSignal<(BaseRemoteComponent Sender, NotificationEvent Event)> NotificationReceived { get; }
+    public event AsyncEventHandler<ComponentStatusChangedEventArgs>? StatusChanged;
+    public event AsyncEventHandler<NotificationReceivedEventArgs>? NotificationReceived;
 }
 public sealed class RemoteComponent : BaseRemoteComponent { public RemoteLock? Lock { get; } public RemoteComponentDto ToDto(); }
 public sealed class RemoteMachine   : BaseRemoteComponent { public RemoteLock Lock { get; } public IReadOnlyList<RemoteUser> Users { get; } public RemoteMachineDto ToDto(); }
@@ -174,7 +175,8 @@ public sealed class RemoteSkill : RemoteCallable
     public SkillState CurrentState { get; }          // gecacht, initial Halted
     public bool IsSuspendable { get; }
     public bool IsFinite { get; }                    // TypeDefinition des Skill-Objekts beginnt mit "Finite"
-    public AsyncSignal<(RemoteSkill Sender, SkillState State)> StateChanged { get; }
+    public event AsyncEventHandler<SkillStateChangedEventArgs>? StateChanged;
+    public IAsyncEnumerable<SkillState> WatchStateAsync(CancellationToken ct = default);
 
     public Task StartAsync(StartWait wait = StartWait.None, TimeSpan? timeout = null, CancellationToken ct = default);
     public Task ResetAsync(bool wait = false, TimeSpan? timeout = null, CancellationToken ct = default);
@@ -220,7 +222,8 @@ public sealed class RemoteVariable : RemoteUaObject
     public IReadOnlyDictionary<string, string> ValidValues { get; }
     public EUInformation? Unit { get; }
     public Opc.Ua.Range? Range { get; }
-    public AsyncSignal<(RemoteVariable Sender, Variant Value)> ValueChanged { get; }
+    public event AsyncEventHandler<VariableValueChangedEventArgs>? ValueChanged;
+    public IAsyncEnumerable<Variant> WatchValueAsync(CancellationToken ct = default);
 
     public Task<object?> ReadValueAsync(bool updateCache = false, CancellationToken ct = default);
     public Task<Variant> ReadRawValueAsync(CancellationToken ct = default);
@@ -272,9 +275,9 @@ public sealed class RemoteLock : RemoteUaObject
     public Task<LockResult> RenewLockAsync(CancellationToken ct = default);
     public Task<RemoteLockState> ReadStateAsync(bool updateCache = true, CancellationToken ct = default);
 
-    public AsyncSignal<(RemoteLock Sender, bool Locked)> LockedChanged { get; }
-    public AsyncSignal<(RemoteLock Sender, string User)> LockingUserChanged { get; }
-    public AsyncSignal<(RemoteLock Sender, double RemainingMs)> RenewDue { get; }
+    public event AsyncEventHandler<LockedChangedEventArgs>? LockedChanged;
+    public event AsyncEventHandler<LockingUserChangedEventArgs>? LockingUserChanged;
+    public event AsyncEventHandler<RenewDueEventArgs>? RenewDue;
 }
 
 public enum LockResult { Ok = 0, NotLocked = -1 }   // Rückgabewerte des Servers; Bad-Status → Exception
@@ -466,6 +469,9 @@ Jede Abweichung braucht einen Test und einen Eintrag in `docs/opensmi/DEVIATIONS
 upstream den Fehler behebt, wird das Verhalten angeglichen.
 
 ## 11. Offene Entscheidungen
+
+> Alle Punkte sind entschieden, siehe Ticket 03, 25 und 27 in `.scratch/opensmi-port`: Repo bleibt,
+> zusätzlich `net8.0`, SmartFactory-Paket danach, async Events statt `AsyncSignal`, `Unit` wird generiert.
 
 1. **Paketname/Repo:** `OpenSmi.Client` im bestehenden Repo `Skill-Sharp-Client`, oder neues Repo
    `opensmi-client-dotnet`? Wäre ein Beitrag an SmartFactory-KL als offizieller C#-Client erwünscht?

@@ -1,6 +1,7 @@
 """Oracle: path and node id of every object in DummyMachine.dto() of the Python opensmi-client (e8740c2).
 
 Run with PYTHONPATH=<opensmi-client checkout>/src against the dummy server; writes dummy-machine-paths.txt.
+Current file: opensmi-server main 29e4d4a (the commit CI pins); older servers (e.g. 547ce5b) differ by 2 variables.
 """
 import asyncio, dataclasses, pathlib
 from opensmi.client import RemoteServer

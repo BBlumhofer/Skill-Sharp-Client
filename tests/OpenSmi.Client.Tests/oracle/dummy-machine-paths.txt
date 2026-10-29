@@ -85,7 +85,6 @@
 /DummyMachine/DummySkillResources/FinalResultData/ComponentName ns=1;s=DummyMachine.SkillSet.DummySkillResources.SkillExecution.FinalResultData.ComponentName
 /DummyMachine/DummySkillResources/FinalResultData/Form ns=1;s=DummyMachine.SkillSet.DummySkillResources.SkillExecution.FinalResultData.Form
 /DummyMachine/DummySkillResources/FinalResultData/ResourceClass ns=1;s=DummyMachine.SkillSet.DummySkillResources.SkillExecution.FinalResultData.ResourceClass
-/DummyMachine/DummySkillResources/FinalResultData/SuccessfulExecutionsCount ns=1;s=DummyMachine.SkillSet.DummySkillResources.SkillExecution.FinalResultData.SuccessfulExecutionsCount
 /DummyMachine/DummySkillResources/ParameterSet/TestResource ns=1;s=DummyMachine.SkillSet.DummySkillResources.SkillExecution.ParameterSet.TestResource
 /DummyMachine/Identification/AssetId ns=1;s=DummyMachine.Identification.AssetId
 /DummyMachine/Identification/ComponentName ns=1;s=DummyMachine.Identification.ComponentName
@@ -100,7 +99,6 @@
 /DummyMachine/StartupSkill ns=1;s=DummyMachine.SkillSet.StartupSkill.SkillExecution
 /DummyMachine/StartupSkill/FinalResultData/SuccessfulExecutionsCount ns=1;s=DummyMachine.SkillSet.StartupSkill.SkillExecution.FinalResultData.SuccessfulExecutionsCount
 /DummyMachine/SuspendableDummySkill ns=1;s=DummyMachine.SkillSet.SuspendableDummySkill.SkillExecution
-/DummyMachine/SuspendableDummySkill/FinalResultData/SuccessfulExecutionsCount ns=1;s=DummyMachine.SkillSet.SuspendableDummySkill.SkillExecution.FinalResultData.SuccessfulExecutionsCount
 /DummyMachine/SuspendableDummySkill/Monitoring/Progress ns=1;s=DummyMachine.SkillSet.SuspendableDummySkill.SkillExecution.Monitoring.Progress
 /DummyMachine/SuspendableDummySkill/ParameterSet/MaxSteps ns=1;s=DummyMachine.SkillSet.SuspendableDummySkill.SkillExecution.ParameterSet.MaxSteps
 /DummyMachine/SuspendableDummySkill/ParameterSet/TimePerStep ns=1;s=DummyMachine.SkillSet.SuspendableDummySkill.SkillExecution.ParameterSet.TimePerStep

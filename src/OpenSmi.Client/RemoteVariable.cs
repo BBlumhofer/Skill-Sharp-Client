@@ -1,3 +1,5 @@
+using System.Globalization;
+using Microsoft.Extensions.Logging;
 using Opc.Ua;
 
 namespace OpenSmi.Client;
@@ -21,7 +23,8 @@ public sealed class RemoteVariable : RemoteUaObject
     public bool IsWritable { get; private set; }
     public string UaDataType { get; private set; } = "";
     public int UaValueRank { get; private set; }
-    /// <summary>For NodeId values: NodeId string → DisplayName of all <c>Utilizes</c> targets, plus "" → "&lt;None&gt;".</summary>
+    /// <summary>For NodeId values: NodeId string → DisplayName of all <c>Utilizes</c> targets, plus "" → "&lt;None&gt;".
+    /// For custom enum DataTypes: value ("0") → member name.</summary>
     public IReadOnlyDictionary<string, string> ValidValues { get; private set; } = NoValidValues;
     public EUInformation? Unit { get; private set; }
     public Opc.Ua.Range? Range { get; private set; }
@@ -52,8 +55,14 @@ public sealed class RemoteVariable : RemoteUaObject
         }
         else if (dataType is { NamespaceIndex: > 0 })
         {
-            var name = await UaUtil.ReadAsync(Session, [(dataType, Opc.Ua.Attributes.BrowseName)], ct).ConfigureAwait(false);
-            UaDataType = (name[0].Value as QualifiedName)?.Name ?? "";
+            var type = await UaUtil.ReadAsync(Session,
+                [(dataType, Opc.Ua.Attributes.BrowseName), (dataType, Opc.Ua.Attributes.DataTypeDefinition)], ct).ConfigureAwait(false);
+            UaDataType = (type[0].Value as QualifiedName)?.Name ?? "";
+            // Custom enum (Python: IntEnum from load_data_type_definitions): value → member name.
+            if ((type[1].Value as ExtensionObject)?.Body is EnumDefinition enumDefinition)
+                ValidValues = enumDefinition.Fields.ToDictionary(f => f.Value.ToString(CultureInfo.InvariantCulture), f => f.Name);
+            else if (StatusCode.IsBad(type[1].StatusCode))
+                Logger.LogWarning("Could not load data type definition of {DataType} ({Status})", UaDataType, type[1].StatusCode);
         }
 
         var properties = await UaUtil.BrowseChildrenAsync(Session, NodeId, ct).ConfigureAwait(false);
@@ -83,7 +92,8 @@ public sealed class RemoteVariable : RemoteUaObject
 
     /// <summary>
     /// Writes <paramref name="value"/> converted to the type of the cached value (e.g. int → Double, string →
-    /// NodeId/LocalizedText). A rejected string that is a display name of <see cref="ValidValues"/> is retried as its key.
+    /// NodeId/LocalizedText). A string that is a display name of <see cref="ValidValues"/> (enum member name,
+    /// <c>Utilizes</c> target) is written as its key.
     /// </summary>
     public async Task WriteValueAsync(object? value, CancellationToken cancellationToken = default)
     {
@@ -91,15 +101,16 @@ public sealed class RemoteVariable : RemoteUaObject
         if (StatusCode.IsGood(status)) return;
         if (status.Code is StatusCodes.BadUserAccessDenied or StatusCodes.BadRequiresLock or StatusCodes.BadOutOfRange)
             throw OpenSmiStatusException.From(status, $"Write of {Path}");
-        var key = value is string s ? ValidValues.FirstOrDefault(kv => kv.Value == s).Key : null;
-        if (key != null && StatusCode.IsGood(await WriteAsync(ToWriteValue(key), cancellationToken).ConfigureAwait(false))) return;
         throw new OpenSmiInvalidValueException($"{value} is not a valid value for {Path} ({status})");
     }
 
     internal WriteValue ToWriteValue(object? value)
     {
         if (!IsWritable) throw new OpenSmiInvalidValueException($"{Path} is not writable");
-        return new WriteValue { NodeId = NodeId, AttributeId = Opc.Ua.Attributes.Value, Value = new DataValue(ToVariant(value)) };
+        if (value is string s && !ValidValues.ContainsKey(s) && ValidValues.FirstOrDefault(kv => kv.Value == s).Key is { } key)
+            value = key;
+        try { return new WriteValue { NodeId = NodeId, AttributeId = Opc.Ua.Attributes.Value, Value = new DataValue(ToVariant(value)) }; }
+        catch (FormatException e) { throw new OpenSmiInvalidValueException($"{value} is not a valid value for {Path}", e); }
     }
 
     private Variant ToVariant(object? value)
