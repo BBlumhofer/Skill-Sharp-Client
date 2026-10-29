@@ -4,7 +4,7 @@ C#-Client für OPC-UA-Server nach dem Smart Machine Interface (SMI), z. B. `open
 Bibliothek ist ein Port des Python-Clients `opensmi-client` (Stand `e8740c2`) und bildet dessen
 Objektmodell ab: Maschinen, Komponenten, Ressourcen, Skills, Methoden, Lock, User, Variablen,
 Notifications, History und DTOs. Sie baut auf dem OPC-Foundation-SDK
-(`OPCFoundation.NetStandard.Opc.Ua.Client`) auf und zielt auf `net10.0`.
+(`OPCFoundation.NetStandard.Opc.Ua.Client`) auf und zielt auf `net8.0` und `net10.0` (die Beispiele nur auf `net10.0`).
 
 Der alte `SkillSharp.Client` liegt nur noch als Wissensquelle in `legacy/`.
 
@@ -12,13 +12,13 @@ Der alte `SkillSharp.Client` liegt nur noch als Wissensquelle in `legacy/`.
 
 Umgesetzt: Connect mit Retry, Browsen mit und ohne BrowseRules, Direct-Node-ID, Variablen lesen,
 schreiben und abonnieren, Skills (Start/Reset/Halt/Suspend mit Waits), Methoden, Lock und
-`AutoLock`, User, Notifications, History, Security (Zertifikat und Trust-Store), DTOs.
+`AutoLock`, User, Notifications, History, Security (Zertifikat und Trust-Store), Reconnect mit
+erhaltenen Objekten, DTOs.
 
 Noch offen:
 
-- Reconnect mit erhaltenen Objekten (in Arbeit)
-- `net8.0` als zweites Target Framework
-- das optionale SmartFactory-Paket (Ports, Storages, Recovery)
+- erneuter Versuch einzelner fehlgeschlagener Monitored Items (SPEC §7.1)
+- das SmartFactory-Paket (Ports, Storages, Recovery) als eigenes Vorhaben
 
 Wo der C#-Client absichtlich anders arbeitet als Python, steht in
 [docs/opensmi/DEVIATIONS.md](docs/opensmi/DEVIATIONS.md).

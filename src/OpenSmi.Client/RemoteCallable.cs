@@ -94,7 +94,7 @@ public sealed class RemoteMethod : RemoteCallable
 public sealed class RemoteSkill : RemoteCallable
 {
     private readonly NodeId _skillObject;
-    private readonly Lock _stateGate = new();
+    private readonly object _stateGate = new(); // not System.Threading.Lock: net8.0 has none
     private TaskCompletionSource _stateChanged = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private int _haltCount;
     private NodeId? _stateMachine, _currentState, _start, _halt, _reset, _suspend;

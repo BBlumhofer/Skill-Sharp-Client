@@ -7,7 +7,7 @@ namespace OpenSmi.Client;
 /// <summary>Port of <c>client/remote_ua_object.py</c>: base of all remote objects.</summary>
 public abstract class RemoteUaObject
 {
-    private readonly Lock _initGate = new();
+    private readonly object _initGate = new(); // not System.Threading.Lock: net8.0 has none
     private Task? _init;
 
     private protected RemoteUaObject(string name, NodeId? nodeId, RemoteServer server, RemoteUaObject? parent,
