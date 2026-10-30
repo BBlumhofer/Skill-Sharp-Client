@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="src/OpenSmi.Client/OpenSmi.Client.csproj" />
+  <Project Path="examples/OpenSmi.Client.Examples/OpenSmi.Client.Examples.csproj" />
+  <Project Path="tests/OpenSmi.Client.Tests/OpenSmi.Client.Tests.csproj" />
+</Solution>

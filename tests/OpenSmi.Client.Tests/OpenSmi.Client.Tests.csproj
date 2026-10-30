@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <!-- Both targets share one dummy server and fixed TestServer ports, so they must not run at once. -->
+    <TestTfmsInParallel>false</TestTfmsInParallel>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="oracle\*.txt" CopyToOutputDirectory="PreserveNewest" />
+    <Using Include="Xunit" />
+    <ProjectReference Include="..\..\src\OpenSmi.Client\OpenSmi.Client.csproj" />
+    <ProjectReference Include="..\..\examples\OpenSmi.Client.Examples\OpenSmi.Client.Examples.csproj" Condition="'$(TargetFramework)' == 'net10.0'" />
+    <Compile Remove="ExamplesTests.cs" Condition="'$(TargetFramework)' != 'net10.0'" />
+  </ItemGroup>
+</Project>

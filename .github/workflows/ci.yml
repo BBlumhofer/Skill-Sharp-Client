@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+env:
+  OPENSMI_SERVER_REF: 29e4d4ae78fb7af236db779a1282b8f048e5b653
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: SmartFactory-KL/opensmi-server
+          ref: ${{ env.OPENSMI_SERVER_REF }}
+          path: opensmi-server
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install ./opensmi-server
+      - run: dotnet test OpenSmi.Client.slnx --logger trx --results-directory TestResults
+        env:
+          OPENSMI_SERVER_DIR: ${{ github.workspace }}/opensmi-server/examples/dummy
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: test-results
+          path: TestResults
