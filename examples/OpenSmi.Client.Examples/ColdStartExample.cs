@@ -27,10 +27,12 @@ public static class ColdStartExample
         await machine.Lock.InitLockAsync(cancellationToken);
 
         // Step 2: reset & then start the StartupSkill if required
+        // Read the state from the server: right after connecting, the cached CurrentState may not be filled yet.
         var startup = machine.SkillSet["StartupSkill"];
-        if (startup.CurrentState != SkillState.Running)
+        var state = await startup.ReadCurrentStateAsync(cancellationToken);
+        if (state != SkillState.Running)
         {
-            if (startup.CurrentState != SkillState.Ready) await startup.ResetAsync(wait: true, cancellationToken: cancellationToken);
+            if (state != SkillState.Ready) await startup.ResetAsync(wait: true, cancellationToken: cancellationToken);
             await startup.StartAsync(StartWait.RunningOrCompleted, cancellationToken: cancellationToken);
         }
 
