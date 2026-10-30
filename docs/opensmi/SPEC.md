@@ -1,40 +1,43 @@
 # Spezifikation: OpenSMI-Client für C# (`OpenSmi.Client`)
 
-Stand: 2026-10-29. Referenz-Snapshots: `SmartFactory-KL/opensmi-client` @ `e8740c2` (2026-10-23),
+Hinweis: Dieses Dokument wurde mit KI-Unterstützung (Claude, Anthropic) erstellt; siehe den KI-Hinweis im README.
+
+Stand: 2026-10-29, vor der Umsetzung geschrieben und danach an den gebauten Client
+(`src/OpenSmi.Client`) angepasst. Wo sich der Plan geändert hat, nennt der Text das Ticket in
+`.scratch/opensmi-port/issues/`. Referenz-Snapshots: `SmartFactory-KL/opensmi-client` @ `e8740c2` (2026-10-23),
 `opensmi-core` @ `68ef623`, `opensmi-server` @ `29e4d4a`, `Skill-Sharp-Client` @ `e57b3c0` (2026-02-13).
 Die Detail-Inventare mit `file:line`-Belegen liegen in [`analyse/`](analyse/). Diese Spec verweist
-auf sie mit **[OI §x]** (OpenSMI-Inventar) und **[SI §x]** (Skill-Sharp-Inventar).
+auf sie mit [OI §x] (OpenSMI-Inventar) und [SI §x] (Skill-Sharp-Inventar).
 
 ## 1. Ziel und Abgrenzung
 
-**Ziel:** Eine C#-Bibliothek, die sich gegenüber einem SMI-konformen OPC-UA-Server (z. B.
+Ziel ist eine C#-Bibliothek, die sich gegenüber einem SMI-konformen OPC-UA-Server (z. B.
 `opensmi-server`) so verhält wie der Python-Client `opensmi-client`. Sie bildet dasselbe
 Objektmodell, dieselbe Browse-Logik, dieselbe Skill- und Lock-Semantik und dieselben DTOs ab, mit
 einer API, die sich in C# natürlich anfühlt.
 
-**Nicht-Ziele:**
+Nicht-Ziele:
 - Kein 1:1-Transkript von Python. Wo Python-Idiome (Context-Manager, `asyncio.timeout`, Signals per
   `set`) keine natürliche Entsprechung haben, gilt die C#-Konvention (§3).
 - Keine Server-Implementierung, kein Port von `opensmi-core` jenseits dessen, was der Client braucht.
 - SmartFactory-spezifische Funktionen (Ports, Storages, RFID-Nachbarn, Startup/Recovery) gehören
-  **nicht** in den Kern. Sie kommen in ein optionales Erweiterungspaket (§9).
+  nicht in den Kern. Sie kommen in ein optionales Erweiterungspaket (§9).
 - Keine API-Kompatibilität zum alten `SkillSharp.Client`. IMAPRO hängt nicht mehr davon ab
   [SI §7].
 
-**Bewusste Abweichungen vom Python-Client** (dort Bugs oder Unschärfen, [OI Zusammenfassung]):
-siehe §10.
+Bewusste Abweichungen vom Python-Client (dort Bugs oder Unschärfen, [OI Zusammenfassung])
+stehen in §10.
 
 ## 2. Pakete und Projektstruktur
 
 | Projekt | Inhalt | Abhängigkeiten |
 |---|---|---|
 | `src/OpenSmi.Client` | Kern: Server, Machine, Component, Resource, Skill, Method, Variable, Lock, AutoLock, User, Browse-Regeln, DTOs, Subscriptions | `OPCFoundation.NetStandard.Opc.Ua.Client` (1.5.377.x), `Microsoft.Extensions.Logging.Abstractions` |
-| `src/OpenSmi.Client.SmartFactory` (optional, Phase 6) | Ports, Storages, Nachbarn, Startup/Recovery auf Basis des Kerns | `OpenSmi.Client` |
-| `tests/OpenSmi.Client.Tests` | Unit-Tests ohne Server | xUnit |
-| `tests/OpenSmi.Client.IntegrationTests` | Tests gegen einen lokal gestarteten `opensmi-server` (Python) | xUnit, Python ≥ 3.11 im CI |
-| `examples/` | C#-Pendants zu `opensmi-client/examples/*.py` | `OpenSmi.Client` |
+| `src/OpenSmi.Client.SmartFactory` (optional, noch nicht begonnen) | Ports, Storages, Nachbarn, Startup/Recovery auf Basis des Kerns | `OpenSmi.Client` |
+| `tests/OpenSmi.Client.Tests` | Unit-Tests ohne Server und Integrationstests gegen einen lokal gestarteten `opensmi-server` (Python), in einem Projekt (Ticket 05) | xUnit, Python 3.12 im CI |
+| `examples/OpenSmi.Client.Examples` | C#-Pendants zu `opensmi-client/examples/*.py` in einem Konsolenprojekt | `OpenSmi.Client` |
 
-- Target Framework: `net10.0`. `net8.0` als zusätzliches Target ist eine offene Entscheidung (§11).
+- Target Frameworks: `net8.0` und `net10.0`, die Beispiele nur `net10.0` (Ticket 24).
 - Root-Namespace = Assembly-Name = PackageId: `OpenSmi.Client`. Damit endet der Wildwuchs aus
   `UAClient.*` und `SkillSharp.Client` [SI §1].
 - Lizenz: MIT, wie upstream. Bei übernommenen Algorithmen gehört der upstream-Copyright-Hinweis
@@ -51,7 +54,7 @@ siehe §10.
 | Logging | structlog | `ILogger<T>` über `ILoggerFactory` im `RemoteServerOptions`, Standard `NullLoggerFactory` |
 | Fehler | asyncua-Exceptions plus `OpenSmiError` | eigene Hierarchie (§8). OPC-UA-Statusfehler als `OpenSmiStatusException` mit `StatusCode`, keine rohen SDK-Exceptions an der Oberfläche |
 | Collections | `dict[str, X]` | `IReadOnlyDictionary<string, X>`, case-sensitive wie BrowseNames. Schreibzugriff nur intern, thread-safe aufgebaut |
-| Nebenläufigkeit | asyncio single-threaded | Notifications kommen auf SDK-Threads. Cache-Felder sind `volatile` oder lock-geschützt; Signals werden nicht auf dem SDK-Publish-Thread awaitet, sondern über einen `Channel<T>` je Server seriell abgearbeitet (Reihenfolge je Node bleibt erhalten) |
+| Nebenläufigkeit | asyncio single-threaded | Notifications kommen auf SDK-Threads. Cache-Felder sind `volatile` oder lock-geschützt; Events werden nicht auf dem SDK-Publish-Thread awaitet, sondern über einen `Channel<T>` je Server seriell abgearbeitet (Reihenfolge je Node bleibt erhalten) |
 | Konfiguration | Konstruktor-Kwargs | `RemoteServerOptions` (record) |
 
 ## 4. Objektmodell (öffentliche API)
@@ -67,11 +70,12 @@ public sealed record RemoteServerOptions
     public required string Url { get; init; }
     public required string Username { get; init; }
     public required string Password { get; init; }
-    public string? ApplicationUri { get; init; }               // Default: urn:uuid:<guid>
+    public string ApplicationUri { get; init; } = $"urn:uuid:{Guid.NewGuid()}";
     public TimeSpan RequestTimeout { get; init; } = TimeSpan.FromSeconds(10);
-    public TimeSpan WatchdogInterval { get; init; } = TimeSpan.FromSeconds(1);
+    public TimeSpan WatchdogInterval { get; init; } = TimeSpan.FromSeconds(1);   // KeepAlive-Periode
     public bool AutoReconnect { get; init; } = true;
     public TimeSpan ReconnectMaxDelay { get; init; } = TimeSpan.FromSeconds(30);
+    public TimeSpan HeartbeatStaleAfter { get; init; } = TimeSpan.FromSeconds(10); // §7.1
     public SecurityOptions Security { get; init; } = SecurityOptions.None;    // §7.3
     public IReadOnlyList<BrowseRule>? BrowseRules { get; init; }              // null = alles, leer = nichts
     public TimeSpan PublishingInterval { get; init; } = TimeSpan.FromMilliseconds(100);
@@ -101,22 +105,24 @@ public sealed class RemoteServer : IAsyncDisposable
 ```
 
 - Ablauf von `ConnectAsync` wie [OI §2.2]. Retry mit exponentiellem Backoff
-  (`ConnectRetryOptions { MaxRetries = 3, MinDelay = 0.5 s, MaxDelay = 30 s }`, `MaxRetries = null`
+  (`ConnectRetryOptions(MaxRetries = 3, MinDelaySeconds = 0.5, MaxDelaySeconds = 30)`, `MaxRetries = null`
   heißt unendlich). `BadIdentityTokenRejected` wird erneut versucht.
   `BadUserAccessDenied`/`BadIdentityTokenInvalid` → `OpenSmiAuthenticationException`
-  (entspricht `ConnectionRefusedError`).
-- Nur **ein** Reconnect-Mechanismus: der `SessionReconnectHandler` des SDK. Der zweite
-  Polling-Loop aus SSC entfällt [SI §2.2].
-- **Nach einem Reconnect bleiben die Objekt-Identitäten erhalten.** Es wird nicht neu gebrowst,
-  der SubscriptionManager stellt die Items wieder her (wie Python). Bei SSC entstanden neue
-  `RemoteModule`-Instanzen, das ist ausdrücklich verboten.
-- `DisposeAsync` ruft `DisconnectAsync`.
+  (entspricht `ConnectionRefusedError`). Ein nicht vertrauenswürdiges Server-Zertifikat führt ohne
+  Retry zu `OpenSmiConnectionException` (Ticket 21).
+- Es gibt nur einen Reconnect-Mechanismus: den `SessionReconnectHandler` des SDK. Der zweite
+  Polling-Loop aus SSC entfällt [SI §2.2]. Mit `AutoReconnect = false` geht ein toter Server auf
+  `Disconnected` (Ticket 28).
+- Nach einem Reconnect bleiben die Objekt-Identitäten erhalten. Es wird nicht neu gebrowst: Das SDK
+  legt die Subscription neu an, und der SubscriptionManager hängt sich um (Ticket 23). SSC erzeugte
+  dabei neue `RemoteModule`-Instanzen.
+- `DisposeAsync` ruft `DisconnectAsync`. Gleichzeitige Aufrufe teilen sich einen Abbau (Ticket 31).
 
 ### 4.2 `RemoteUaObject` (abstrakte Basis) [OI §2.0]
 
 `Name`, `Path` (POSIX-Pfad als `string`, z. B. `/M/C/Monitoring/Var`), `NodeId`, `UaType`
 (BrowseName der TypeDefinition, Default `"UNKNOWN"`), `Parent`, `Server`, `BrowseRules`,
-`InitExceptions`, `LifecycleState`, `InitAsync(ct)`, `ReadUaTypeAsync(ct)`. Beim Setzen der
+`InitExceptions`, `IsInitialized`, `InitAsync(ct)`, `ReadUaTypeAsync(ct)`. Beim Setzen der
 `NodeId` registriert sich das Objekt im Server-Register (Weak-Referenzen, entspricht
 `WeakValueDictionary`).
 
@@ -136,7 +142,6 @@ public abstract class BaseRemoteComponent : RemoteUaObject
     public Attributes Attributes { get; }
     public ParameterSet ParameterSet { get; }
     public string CurrentState { get; }                       // MachineryItemState, Default "Unknown"
-    public MachineryItemState? CurrentStateEnum { get; }      // zusätzlich typisiert (Core-Enum)
     public Task<string> ReadCurrentStateAsync(CancellationToken ct = default);
     public event AsyncEventHandler<ComponentStatusChangedEventArgs>? StatusChanged;
     public event AsyncEventHandler<NotificationReceivedEventArgs>? NotificationReceived;
@@ -190,9 +195,9 @@ public sealed class RemoteSkill : RemoteCallable
 public enum StartWait { None, RunningOrCompleted, Completion }
 ```
 
-- **`NodeId` des Skills ist der `SkillExecution`-Knoten** (bzw. `FeasibilityCheck`/`PreconditionCheck`),
+- Die `NodeId` des Skills ist der `SkillExecution`-Knoten (bzw. `FeasibilityCheck`/`PreconditionCheck`),
   `Name` ist der BrowseName des Skill-Objekts darüber. `IsFinite` liest die TypeDefinition des
-  **Eltern**-Knotens [OI §2.9].
+  Eltern-Knotens [OI §2.9].
 - Die Methoden `Start`/`Halt`/`Reset`/`[Suspend]` werden einmal beim Init unter `StateMachine`
   aufgelöst und gecacht. Der Aufruf geht mit `ObjectId = StateMachine` und ohne Argumente
   [OI §5]. Die SSC-Suche über Teilstrings, BFS und Retry entfällt [SI §2.6].
@@ -227,7 +232,6 @@ public sealed class RemoteVariable : RemoteUaObject
 
     public Task<object?> ReadValueAsync(bool updateCache = false, CancellationToken ct = default);
     public Task<Variant> ReadRawValueAsync(CancellationToken ct = default);
-    public Task<string?> ReadResolvedValueAsync(CancellationToken ct = default);
     public Task WriteValueAsync(object? value, CancellationToken ct = default);
     public Task<IReadOnlyList<TimestampedValue>> ReadHistoryAsync(DateTime? start = null, DateTime? end = null,
                                                                    uint numValues = 0, bool returnBounds = true,
@@ -243,16 +247,19 @@ public abstract class RemoteVariableContainer : RemoteUaObject, IReadOnlyDiction
 public sealed class Attributes, Identification, Monitoring, ParameterSet, FinalResultData : RemoteVariableContainer;
 ```
 
-- **Typkonvertierung beim Schreiben:** Der Ziel-`BuiltInType` kommt aus dem gecachten
+- Typkonvertierung beim Schreiben: Der Ziel-`BuiltInType` kommt aus dem gecachten
   `RawValue.TypeInfo` bzw. dem DataType. `int` → `Double` usw. wird konvertiert. In SSC fehlte das,
   Folge war `BadTypeMismatch` [SI §2.11]. `string` → `NodeId` und `string` → `LocalizedText(en-US)`
   wie in `ua_node_util.write_value` [OI §2.10].
 - Bei abgelehntem Wert gilt die Fallback-Logik über `ValidValues`-Displaynamen wie in Python.
   Danach kommt `OpenSmiInvalidValueException`.
-- `ReadAllAsync`/`WriteAllAsync` arbeiten **gebatcht**: ein Request statt N sequenzieller
+- `ReadAllAsync`/`WriteAllAsync` arbeiten gebatcht: ein Request statt N sequenzieller
   Requests wie in Python. Bei `WriteAllAsync` mit unbekanntem Namen fliegt
   `KeyNotFoundException`, bevor überhaupt geschrieben wird.
 - Variablen mit derselben NodeId werden über das Server-Register wiederverwendet.
+- Custom-Enum-Datentypen (Namespace > 0) liest der Client über `DataTypeDefinition`, ohne das
+  ComplexTypes-Paket: `ValidValues` bildet die Zahl auf den Membernamen ab, `Value` ist der
+  Membername, geschrieben wird per Name oder Zahl. Structs bleiben `ExtensionObject` (Ticket 30).
 
 ### 4.6 `RemoteLock`, `AutoLock` [OI §2.12–2.13, §6]
 
@@ -291,17 +298,16 @@ public sealed class AutoLock : IAsyncDisposable
 }
 ```
 
-- **Eigentümerschaft** wird ausschließlich über `LockingUser == Username` bestimmt, wie in Python.
+- Die Eigentümerschaft wird ausschließlich über `LockingUser == Username` bestimmt, wie in Python.
   Die SSC-Heuristik (ApplicationName, Hostname, IP, localhost, „unlesbar = gehört uns“) ist
   falsch und fällt weg [SI §2.3].
 - Methoden werden exakt per BrowseName aufgelöst (`InitLock`, `BreakLock`, `ExitLock`,
-  `RenewLock`). Kein Teilstring-Fallback und **kein** Durchprobieren weiterer Methoden. In SSC
+  `RenewLock`), ohne Teilstring-Fallback und ohne Durchprobieren weiterer Methoden. In SSC
   konnte `InitLock` dadurch in `ExitLock` laufen [SI §2.9].
 - Der Integer-Rückgabewert des Servers wird ausgewertet und als `LockResult` geliefert. Python
   ignoriert ihn [OI §6].
 - `InitLock` wird ohne Argumente aufgerufen, so wie es der opensmi-server erwartet
-  ([OI §6]: optionales `context`). Ein optionaler `context`-Parameter ist vorgesehen, falls
-  DI-konforme Fremdserver ihn verlangen.
+  ([OI §6]: optionales `context`). Einen `context`-Parameter gibt es nicht.
 - `MaxInactiveLockTime` wird aus DI `i=6387` gelesen, Fallback 60 000 ms.
 - `AutoLock`: Verhalten wie [OI §6] (bei Verlust neu sperren, bei `RenewDue` erneuern, ein
   Renew-Task gleichzeitig, Renew-Timeout 5 s). `blocking=true` respektiert `ct`.
@@ -310,15 +316,16 @@ public sealed class AutoLock : IAsyncDisposable
 ### 4.7 `RemoteUser` [OI §2.14]
 
 `Name`, `Data` (`AllowMultiple`, `UserLevel`, `MaxAccessLevel`, `IsPresent`),
-`UserPresenceChanged`. Im DTO heißt das Feld **`LockPriority`** (aus `UserLevel` geparst,
-`null` wenn nicht numerisch), nicht `current_access_level` wie in Python. Dort ist das ein
-Benennungsfehler [OI §2.14].
+`UserPresenceChanged`, `LockPriority` (aus `UserLevel` geparst, `null` wenn nicht numerisch). Im
+DTO heißt das Feld ebenfalls `LockPriority`, nicht `current_access_level` wie in Python. Dort ist
+das ein Benennungsfehler [OI §2.14].
 
 ### 4.8 `NotificationEvent` [OI §2.15, §7]
 
 `record NotificationEvent(string Message, int Severity, string ErrorCode)`. Das Parsing von
-`"<msg>|||<code>"` erfolgt wie in Python, `ErrorCode` aus dem Event hat Vorrang. Fallback auf
-den Kindknoten `Messages`, wenn `Notification` `BadServiceUnsupported` liefert.
+`"<msg>|||<code>"` erfolgt wie in Python, `ErrorCode` aus dem Event hat Vorrang. Den Fallback
+auf den Kindknoten `Messages` (alte v4-Server, wenn `Notification` `BadServiceUnsupported`
+liefert) hat der Kern nicht; er gehört ins SmartFactory-Paket (Ticket 16).
 
 ## 5. Browsing [OI §3]
 
@@ -326,11 +333,11 @@ den Kindknoten `Messages`, wenn `Notification` `BadServiceUnsupported` liefert.
   erstes Kind von `Objects` mit `BrowseName.Name == "Machines"`, unabhängig vom Namespace. Die
   SSC-Fallbacks `SFM:ModuleSet` und „DisplayName enthält Module/Machine“ gehören in das
   SmartFactory-Paket, nicht in den Kern.
-- Dispatch der Kinder per **exaktem** `BrowseName.Name` gemäß Tabelle [OI §3]: `Lock`, `SkillSet`,
+- Dispatch der Kinder per exaktem `BrowseName.Name` gemäß Tabelle [OI §3]: `Lock`, `SkillSet`,
   `Notification`, `Identification`, `Attributes`, `Monitoring`, `ParameterSet`, `Components`,
   `Resources`, `MachineryBuildingBlocks`, `MethodSet`. Unbekannte Kinder erzeugen nur eine
-  Warnung im Log. **Keine** Teilstring- oder TypeDefinition-Heuristiken wie in SSC [SI §4].
-- Browse erfolgt **rekursiv** (Komponenten in Komponenten). Die SSC-Discovery ging nur eine Ebene
+  Warnung im Log. Teilstring- oder TypeDefinition-Heuristiken wie in SSC gibt es nicht [SI §4].
+- Browse erfolgt rekursiv (Komponenten in Komponenten). Die SSC-Discovery ging nur eine Ebene
   tief [SI §2.3].
 - Pfadmodell und Regelauswertung exakt wie [OI §3]: Ordnersegmente (`Components`, `SkillSet`,
   `MethodSet`) erscheinen nicht im Pfad.
@@ -340,9 +347,9 @@ den Kindknoten `Messages`, wenn `Notification` `BadServiceUnsupported` liefert.
 - `BrowseRules = []` überspringt die Discovery. Danach können Objekte direkt aus bekannten NodeIds
   erzeugt werden (Direct-Node-ID-Modus):
   `await RemoteComponent.CreateAsync(server, name, nodeId, parent: null, rules, ct)`.
-- Kinder-Browses eines Objekts laufen nebenläufig (begrenzt, Default 8). Fehler einzelner Kinder
-  landen in `InitExceptions` und sind zusätzlich über die Option `ThrowOnPartialBrowse` (Default
-  `false`) als `AggregateException` abrufbar. Verbindungs- und Timeout-Fehler brechen ab.
+- Die Inits der Kinder eines Objekts laufen nebenläufig und ohne Begrenzung, wie `gather` in
+  Python. Fehler einzelner Kinder landen in `InitExceptions`. Verbindungs-, Timeout- und
+  Abbruchfehler brechen ab.
 - Browse- und Read-Operationen arbeiten gebatcht (`BrowseAsync` mit mehreren Knoten,
   `ReadAsync` mit mehreren Attributen). Dafür gibt es keinen statischen, unbegrenzten
   Path-Cache wie in SSC [SI §2.14].
@@ -364,30 +371,30 @@ Erwartete Struktur unterhalb von `Objects/Machines`, siehe den Baum in [OI §4.2
 | Abhängigkeiten | Referenztyp `Requires` (vorwärts = `DependsOn`, invers = `DependencyOf`) |
 | Variablen-Metadaten | Properties `EngineeringUnits`, `EURange`; NodeId-Werte mit `Utilizes`-Referenzen ergeben `ValidValues` |
 
-**Offen:** Ob `Requirements` am Skill-Objekt oder unter `SkillExecution` liegt, ist nicht
-verifiziert [OI §4.2]. Der Client sucht an beiden Stellen und nimmt den ersten Treffer. Ein
-Integrationstest entscheidet die Frage (Plan, Phase 1).
+`Requirements` liegt beim Dummy-Server sowohl am Skill-Objekt als auch unter `SkillExecution`
+[OI §4.2]. Der Client liest wie Python nur `SkillExecution/Requirements` (Ticket 01).
 
-`SkillState`-IDs 11–20 und `MachineryItemState`/`MachineryOperationMode` werden als C#-Enums aus
-`opensmi-core/ua_enums.py` übernommen. `Unit` (Rec-20-Tabelle, ca. 2100 Einträge) wird **nicht**
-von Hand portiert, sondern bei Bedarf per Generator aus `unit_all.py` erzeugt. Der Kern braucht
-sie nicht, weil `Unit` als `EUInformation` exponiert wird.
+`SkillState` (IDs 11 bis 20) ist ein C#-Enum nach `opensmi-core/ua_enums.py`. Den
+`MachineryItemState` liefert der Client als Text (`CurrentState`). Das `Unit`-Enum (Rec-20-Tabelle,
+2133 Einheiten) erzeugt `tools/generate_units.py` aus opensmi-core, mit Namen in PascalCase
+(`Unit.Centimetre`, Ticket 26 und 29). `RemoteVariable.Unit` bleibt `EUInformation`; die Abbildung
+auf das Enum geht über `ToUnit()`.
 
 ## 7. Subscriptions, History, Security
 
 ### 7.1 SubscriptionManager [OI §7]
-- **Eine** gemeinsame Subscription pro Server. Items werden je NodeId dedupliziert, ein Item kann
-  mehrere Handler tragen. Das Anlegen erfolgt in Chunks von `MaxMonitoredItemsPerCall` (Fallback
-  100).
-- Die Notification **verwendet den gelieferten Wert**. Die SSC-Praxis „bei jeder Änderung neu
+- Eine gemeinsame Subscription pro Server. Items werden je NodeId dedupliziert, ein Item kann
+  mehrere Handler tragen. Das Aufteilen in Chunks erledigt das SDK beim Anlegen (Ticket 07).
+- Die Notification verwendet den gelieferten Wert. Die SSC-Praxis „bei jeder Änderung neu
   lesen“ ist verboten [SI §2.13].
 - Heartbeat über `CurrentTime`: Kommt länger als `HeartbeatStaleAfter` (Default 10 s) keine
-  Notification, wird die Subscription gelöscht und mit allen Data- **und** Event-Items neu
-  angelegt (SSC verlor Event-Items beim Rebind). Fehlgeschlagene Einzel-Items werden mit Backoff
-  erneut versucht; Python versucht das nicht.
+  Notification, wird die Subscription gelöscht und mit allen Data- und Event-Items neu
+  angelegt (SSC verlor Event-Items beim Rebind). Fehlgeschlagene Einzel-Items werden nur geloggt
+  und, wie in Python, nicht erneut versucht. Ein Retry kommt erst, wenn ein echter Server das
+  Problem zeigt (Ticket 28).
 - Events werden per `SourceNode` an die registrierten Handler geroutet. Der EventFilter wählt
   `Message`, `Severity`, `SourceNode` und `ErrorCode`.
-- `SubscribeDataChange`/`SubscribeEvent` liefern ein `IAsyncDisposable`-Handle zum Abbestellen.
+- Abbestellen gibt es nicht, der Python-Client bestellt auch nie ab (Ticket 07).
 
 ### 7.2 History
 `RemoteVariable.ReadHistoryAsync` über `HistoryRead` (ReadRawModifiedDetails), Semantik wie
@@ -403,12 +410,16 @@ public sealed record SecurityOptions(
 { public static SecurityOptions None { get; } }
 ```
 - Ohne Security keine Zertifikatserzeugung.
-- Mit Security wird ein selbstsigniertes Zertifikat **einmal** erzeugt und im Store abgelegt
+- Mit Security wird ein selbstsigniertes Zertifikat einmal erzeugt und im Store abgelegt
   (CN „OpenSMI C# Client“, SAN = ApplicationUri). Python erzeugt es bei jedem Connect neu.
-- Server-Zertifikate werden standardmäßig gegen den Trust-Store geprüft. `AutoAccept` muss man
-  explizit einschalten. SSC akzeptierte hart kodiert alles [SI §2.1].
-- Das Session-Objekt wird über `DefaultSessionFactory`/`ISessionFactory` erzeugt, **ohne
-  Reflection** [SI §2.1].
+  Ohne `CertificateStorePath` liegt der Store unter `%LOCALAPPDATA%/OpenSmi.Client/pki`.
+- Server-Zertifikate werden standardmäßig gegen den Trust-Store geprüft (Default
+  `<CertificateStorePath>/trusted`). `AutoAcceptServerCertificate` muss man explizit einschalten.
+  SSC akzeptierte hart kodiert alles [SI §2.1].
+- Der Endpoint wird exakt nach Policy und Mode gewählt; gibt es keinen passenden, kommt sofort
+  `OpenSmiConnectionException` (Ticket 21).
+- Das Session-Objekt wird über `DefaultSessionFactory`/`ISessionFactory` erzeugt, ohne
+  Reflection [SI §2.1].
 - Authentifizierung über Username/Password (wie upstream).
 
 ## 8. Fehlerbehandlung
@@ -429,7 +440,7 @@ OpenSmiException
 `TimeoutException` und `OperationCanceledException` bleiben die Standardtypen.
 
 ### 8.2 Grundsätze
-- **Keine leeren `catch {}`**. Jede abgefangene Ausnahme wird geloggt und entweder gesammelt
+- Keine leeren `catch {}`. Jede abgefangene Ausnahme wird geloggt und entweder gesammelt
   (`InitExceptions`) oder weitergereicht. SSC enthält Hunderte stiller Catches [SI §2].
 - Fehlende Pflichtknoten (Lock: 8 Knoten; Skill: `CurrentState`, `Start`, `Halt`, `Reset`)
   führen zu `OpenSmiProtocolException` mit Pfad, nicht zu `AssertionError`.
@@ -437,8 +448,9 @@ OpenSmiException
 
 ## 9. SmartFactory-Erweiterung (`OpenSmi.Client.SmartFactory`, optional)
 
-Nur nötig, wenn reale SmartFactory-KL-Module (CA-Module & Co.) angesteuert werden sollen. Aufbau
-auf dem Kern, nicht als Fork:
+Noch nicht begonnen; das Paket ist ein eigenes Vorhaben nach dem Client (Ticket 03). Es ist nur
+nötig, wenn reale SmartFactory-KL-Module (CA-Module & Co.) angesteuert werden sollen, und baut auf
+dem Kern auf statt ihn zu forken:
 
 | SSC-Funktion [SI §3.6] | Neue Form |
 |---|---|
@@ -465,23 +477,27 @@ auf dem Kern, nicht als Fork:
 | `read_all`/`write_all` sequenziell | gebatcht | Performance |
 | `feasibility/precondition_check_set` nicht im DTO | im DTO enthalten | Vollständigkeit |
 
-Jede Abweichung braucht einen Test und einen Eintrag in `docs/opensmi/DEVIATIONS.md`. Wenn
+Dazu kommen das Benachrichtigungsmodell (§3), die Unit-Namen (§6) und die Custom-Enum-Typen
+(§4.5). Jede Abweichung hat einen Test und einen Eintrag in [DEVIATIONS.md](DEVIATIONS.md). Wenn
 upstream den Fehler behebt, wird das Verhalten angeglichen.
 
-## 11. Offene Entscheidungen
+## 11. Entscheidungen
 
-> Alle Punkte sind entschieden, siehe Ticket 03, 25 und 27 in `.scratch/opensmi-port`: Repo bleibt,
-> zusätzlich `net8.0`, SmartFactory-Paket danach, async Events statt `AsyncSignal`, `Unit` wird generiert.
+Entschieden in Ticket 03 (2026-10-29) und den Folgetickets 24 bis 27:
 
-1. **Paketname/Repo:** `OpenSmi.Client` im bestehenden Repo `Skill-Sharp-Client`, oder neues Repo
-   `opensmi-client-dotnet`? Wäre ein Beitrag an SmartFactory-KL als offizieller C#-Client erwünscht?
-2. **Target Frameworks:** nur `net10.0` oder zusätzlich `net8.0` (LTS)?
-3. **SmartFactory-Paket:** wird es überhaupt gebraucht (reale Hardware), oder reicht der Kern?
-4. **Signals vs. `IObservable<T>`/`IAsyncEnumerable<T>`:** Die Spec legt `AsyncSignal<T>` fest
-   (nah an Python). Rx wäre eine zusätzliche Abhängigkeit.
-5. **`Unit`-Enum:** generieren (≈ 2100 Einträge) oder weglassen?
+1. Repo: `OpenSmi.Client` bleibt im Repo `Skill-Sharp-Client`. Umbenennung, NuGet und eine
+   Anfrage bei SmartFactory-KL warten, bis klar ist, ob SmartFactory-KL den Client aufnimmt.
+2. Target Frameworks: `net8.0` und `net10.0`.
+3. SmartFactory-Paket: kommt nach dem Client als eigenes Vorhaben.
+4. Benachrichtigungen: async Events, `Watch…Async` als `IAsyncEnumerable` und `WaitFor…Async`
+   statt `AsyncSignal<T>`; kein Rx.
+5. `Unit`-Enum: wird generiert.
 
 ## 12. Abnahmekriterien
+
+Stand 2026-10-30: Die Tests in `tests/OpenSmi.Client.Tests` laufen in der CI unter Linux gegen
+opensmi-server `main` (`29e4d4a`) grün, `net8.0` mit 69 und `net10.0` mit 81 Tests. Eine
+Analyzer-Regel gegen leere `catch`-Blöcke ist nicht eingerichtet.
 
 - Alle 12 Python-Beispiele aus `opensmi-client/examples/` existieren als C#-Beispiele und laufen
   gegen einen lokal gestarteten `opensmi-server` mit den Dummy-Usern `visitor`, `operator` und

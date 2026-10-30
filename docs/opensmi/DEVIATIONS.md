@@ -1,9 +1,12 @@
 # Abweichungen vom Python-Client
 
-Der C#-Client verhält sich wie `opensmi-client @ e8740c2`, außer an den Stellen aus
-[SPEC §10](SPEC.md#10-bewusste-abweichungen-vom-python-original-zusammenfassung). Jede Zeile nennt die
-Stelle im Code und den Test, der das Verhalten belegt (alle Tests in `tests/OpenSmi.Client.Tests`).
-Behebt upstream einen der Fehler, wird das Verhalten hier angeglichen.
+Der C#-Client verhält sich wie `opensmi-client @ e8740c2`, außer an den Stellen in dieser Tabelle.
+Die ersten elf Zeilen stammen aus [SPEC §10](SPEC.md#10-bewusste-abweichungen-vom-python-original-zusammenfassung)
+(die Security-Zeile der SPEC ist hier zweigeteilt), die letzten vier aus späteren Entscheidungen (Tickets 25, 26 und 30 unter `.scratch/opensmi-port/issues`).
+Jede Zeile nennt die Stelle im Code und den Test, der das Verhalten belegt; alle Tests liegen in
+`tests/OpenSmi.Client.Tests`. Behebt upstream einen der Fehler, wird das Verhalten angeglichen.
+
+Hinweis: Dieses Dokument wurde mit KI-Unterstützung (Claude, Anthropic) erstellt; siehe den KI-Hinweis im README.
 
 | Python | C# | Code | Test |
 |---|---|---|---|
@@ -22,5 +25,3 @@ Behebt upstream einen der Fehler, wird das Verhalten hier angeglichen.
 | Unit-Enum in Großbuchstaben (`CENTIMETRE`) | PascalCase (`Unit.Centimetre`); `EUInformation.Description` bleibt der Python-Name | `tools/generate_units.py`, `Unit.g.cs`, `Units.cs` | `UnitTests.Eu_information_round_trips_like_python` |
 | Custom-Datentypen: `load_data_type_definitions` beim Connect (global, Enums und Structs), Enum-Wert als `IntEnum`-Member (JSON: Zahl) | Je Variable mit eigenem DataType wird `DataTypeDefinition` gelesen, nur Enums: `ValidValues` = `"0"` → Name, `Value` = Membername (`"Green"`); Structs bleiben `ExtensionObject`; Lesefehler nur Warnung | `RemoteVariable.cs` (`InitCoreAsync`) | `CustomTypeTests.Enum_variable_exposes_type_name_valid_values_and_member_name` |
 | Schreiben eines Enum-Membernamens scheitert (asyncua-Serialisierungsfehler, nicht abgefangen); Anzeigename wird erst nach Ablehnung als Schlüssel neu geschrieben | Ein Anzeigename aus `ValidValues` wird vor dem Schreiben auf seinen Schlüssel abgebildet (gilt auch für `WriteAllAsync`); nicht konvertierbarer Wert → `OpenSmiInvalidValueException` | `RemoteVariable.cs` (`ToWriteValue`) | `CustomTypeTests.Enum_variable_is_written_by_member_name_or_number` |
-
-Alle Abweichungen aus SPEC §10 sind umgesetzt.

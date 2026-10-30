@@ -1,5 +1,7 @@
 # OpenSMI Python Client: API and behavior inventory (basis for a C# port)
 
+Note: this is an analysis snapshot of the Python client, core and server at the commits below, taken on 2026-10-29. It is not updated when that code changes and does not describe the C# client.
+
 Path prefixes used in citations:
 
 - `osc/` = `scratchpad/src/osc` (client). Client modules are cited as `client/<file>` = `osc/src/opensmi/client/<file>`.
@@ -7,8 +9,6 @@ Path prefixes used in citations:
 - `osrv/` = `scratchpad/src/osrv`. Server modules are cited as `server/<file>` = `osrv/src/opensmi/server/<file>`. Nodeset XMLs are cited as `nodesets/<file>` = `osrv/src/opensmi/server/nodesets/<file>`.
 
 Snapshot: osc HEAD `e8740c2` (2026-10-23), ocore HEAD `68ef623` (2026-10-23), osrv HEAD `29e4d4a` (2026-10-29). None of the clones has git tags, so the runtime version (setuptools-scm) cannot be read from them.
-
----
 
 ## 1. Package overview
 
@@ -32,15 +32,13 @@ Core exports used by the client: `Signal`, `SkillState`, `MachineryItemState`, `
 
 Programming model: everything is `async` (asyncio). Callbacks are async functions attached to `Signal` objects. Logging goes through structlog.
 
----
-
 ## 2. Classes
 
 ### 2.0 Cross-cutting base: `BaseUaObject` (core), `LifecycleMixin` (core), `RemoteUaObject` (client)
 
 **`BaseUaObject`** (`core/base_ua_object.py:21-139`)
 - ctor `(*, name: str|None=None, server=None, parent=None, **kwargs)`. `name` defaults to the class name. Raises `TypeError` for a non-str or empty name (`:42-46`).
-- `ua_node` property (`:59-66`) raises `RuntimeError` if unset. The setter can be called **once only** (`RuntimeError` otherwise) and **registers the object in `server._ua_objects`**, keyed by NodeId (`:68-76`).
+- `ua_node` property (`:59-66`) raises `RuntimeError` if unset. The setter can be called once only (`RuntimeError` otherwise) and **registers the object in `server._ua_objects`**, keyed by NodeId (`:68-76`).
 - `name` (`:78-81`), `path: PurePosixPath` = `parent.path / name`, or `/name` when there is no parent (`:91-97`). `full_name` is deprecated (`:83-89`).
 - `server` property: resolved lazily from the parent chain and then cached (`:122-135`). `parent` getter/setter (`:104-113`). `logger` is a structlog BoundLogger (`:99-102`).
 
@@ -84,7 +82,7 @@ ProductUri is fixed to `urn:opensmi:client` (`:133`). The constructor creates a 
 
 **Public attributes and properties**
 - `subscription_manager: SubscriptionManager` (`:149`).
-- `custom_type_definitions: ClassVar[dict[str,type]]`. This is **global across instances** because asyncua stores loaded types globally (`:76`, `:358-364`; docstring warning `:69-72`).
+- `custom_type_definitions: ClassVar[dict[str,type]]`. This is global across instances because asyncua stores loaded types globally (`:76`, `:358-364`; docstring warning `:69-72`).
 - `init_exceptions: list[Exception]` holds machine-level init failures (`:165`, `:442`).
 - `browse_rules` (`:168-171`), `ua_client` (the raw asyncua `Client`, `:385-388`), `path` (always `/`, `:400-403`), `status` (`:444-447`), `connected` (true iff the asyncua `UaClientState.CONNECTED`, `:449-452`), `machines: dict[str, RemoteMachine]` keyed by BrowseName.Name (`:454-457`), `username` (`:459-462`).
 - Inherited from `BaseServer` (`core/base_server.py:21-75`): `get_ua_object(node_id)` (raises KeyError), `get_ua_object_optional(node_id)`, `register_ua_object`, `unregister_ua_object`, `ua_get_namespace_index(uri|NamespaceProvider) -> Int16` (raises KeyError), `ua_get_node_id(NodeIdDefinition)`.
@@ -106,11 +104,11 @@ ProductUri is fixed to `urn:opensmi:client` (`:133`). The constructor creates a 
     7. If `browse_rules` is truthy: set status BROWSING, then `_browse_machines()`.
     8. Subscribe to CurrentTime.
     9. Set status CONNECTED.
-- `async disconnect()` (`:289-309`): cancels the status task, sets DISCONNECTING, cancels a pending connect, shuts down subscriptions, disconnects the UA client, and always ends in DISCONNECTED. Remote objects are **not** `shutdown()`.
+- `async disconnect()` (`:289-309`): cancels the status task, sets DISCONNECTING, cancels a pending connect, shuts down subscriptions, disconnects the UA client, and always ends in DISCONNECTED. Remote objects are not `shutdown()`.
 - `async __aenter__` calls `connect()` with the defaults and returns self. `__aexit__` calls `disconnect()` (`:484-491`).
 - `async ua_on_data_change(...)` forwards to `time_updated` (`:396-398`).
 
-**Status tracking**: a background task follows asyncua's `UaClientState` and maps it onto `RemoteServerStatus` (`:464-482`). `CONNECTED` coming from asyncua is suppressed until browsing finishes (`_suppress_connected`, `:144`, `:353`, `:382`, `:466-468`). An asyncua auto-reconnect produces `RECONNECTING` and then `CONNECTED`, but it does **not** re-browse. Re-browsing happens only in `_connect`. Subscriptions are recovered by the `SubscriptionManager` heartbeat (§7). Whether asyncua itself transfers subscriptions on reconnect is not handled here and is unclear.
+**Status tracking**: a background task follows asyncua's `UaClientState` and maps it onto `RemoteServerStatus` (`:464-482`). `CONNECTED` coming from asyncua is suppressed until browsing finishes (`_suppress_connected`, `:144`, `:353`, `:382`, `:466-468`). An asyncua auto-reconnect produces `RECONNECTING` and then `CONNECTED`, but it does not re-browse. Re-browsing happens only in `_connect`. Subscriptions are recovered by the `SubscriptionManager` heartbeat (§7). Whether asyncua itself transfers subscriptions on reconnect is not handled here and is unclear.
 
 ### 2.3 `BaseRemoteComponent` (`client/remote_component.py:61-418`)
 Bases: `RemoteUaObject["BaseRemoteComponent"]`, `UaDataChangeSubscriber`, `UaEventSubscriber`. Represents a server-side `BaseMachineryItem`.
@@ -136,7 +134,7 @@ Bases: `RemoteUaObject["BaseRemoteComponent"]`, `UaDataChangeSubscriber`, `UaEve
 
 ### 2.5 `RemoteMachine(BaseRemoteComponent)` (`client/remote_machine.py:29-112`)
 - ctor `(*, name, ua_node, server, browse_rules=None)`. `parent` is always `None` (`:32-49`).
-- `lock -> RemoteLock` **asserts** that it is not None, because the lock is mandatory for machines (`:51-55`). If the `LOCK` feature was not browsed, accessing `lock` (and therefore calling `dto()`, `:66`) raises `AssertionError`.
+- `lock -> RemoteLock` asserts that it is not None, because the lock is mandatory for machines (`:51-55`). If the `LOCK` feature was not browsed, accessing `lock` (and therefore calling `dto()`, `:66`) raises `AssertionError`.
 - `users: list[RemoteUser]` (`:81-84`). Users are browsed from `MachineryBuildingBlocks/Users` only when `BrowseFeature.USERS` is set (`:97-112`).
 - `dto() -> RemoteMachineDTO` (`:57-79`).
 
@@ -158,7 +156,7 @@ Base of `RemoteMethod` and `RemoteSkill`. Parent: `BaseRemoteComponent`.
 
 ### 2.8 `RemoteMethod(RemoteCallable)` (`client/remote_method.py:20-56`)
 - `_init_handle_node` records the NodeId of the `Call` child (`:40-48`).
-- `async call() -> Mapping[str, Any]` calls the OPC UA method `Call` on the method object with **no input arguments**, then returns `final_result_data.read_all()`. Parameters are passed by writing `parameter_set` first. Errors propagate as raw asyncua exceptions ("User is responsible", `:50-56`). If the `Call` node is missing, `_ua_call` is unset and `call()` raises `AttributeError` (this is implicit, inferred from `:23`).
+- `async call() -> Mapping[str, Any]` calls the OPC UA method `Call` on the method object with no input arguments, then returns `final_result_data.read_all()`. Parameters are passed by writing `parameter_set` first. Errors propagate as raw asyncua exceptions ("User is responsible", `:50-56`). If the `Call` node is missing, `_ua_call` is unset and `call()` raises `AttributeError` (this is implicit, inferred from `:23`).
 - `dto() -> RemoteCallableDTO` (`:25-38`).
 
 ### 2.9 `RemoteSkill(RemoteCallable, UaDataChangeSubscriber)` (`client/remote_skill.py:58-262`)
@@ -166,9 +164,9 @@ Base of `RemoteMethod` and `RemoteSkill`. Parent: `BaseRemoteComponent`.
 - ctor `(*, name, ua_node, server, parent, browse_rules)`. Initial cached state is `SkillState.HALTED` (`:63-78`).
 - Signal: `state_changed: Signal[RemoteSkill, SkillState]` fires on every change of the cached state (`:78`, `:217-233`).
 - Properties: `current_state: SkillState` (cached, `:240-243`), `suspendable: bool` (true iff a `Suspend` method node exists, `:145-148`), `is_finite: bool` (true iff `ua_type.lower().startswith("finite")`, `:259-262`).
-- `async ua_read_type()` is overridden to read the type definition of the **parent node** (the skill object, e.g. `FiniteSkillType`/`ContinuousSkillType`) (`:250-257`).
+- `async ua_read_type()` is overridden to read the type definition of the parent node (the skill object, e.g. `FiniteSkillType`/`ContinuousSkillType`) (`:250-257`).
 - Methods:
-  - `async start(*, wait=False)`: waits for RUNNING **or** COMPLETED (`:150-158`).
+  - `async start(*, wait=False)`: waits for RUNNING or COMPLETED (`:150-158`).
   - `async reset(*, wait=False)`: waits for READY (`:160-168`).
   - `async halt(*, wait=False)`: waits for HALTED (`:170-175`).
   - `async suspend(*, wait=False)`: raises `SkillNotSuspendableError` if there is no Suspend node (`:177-189`).
@@ -214,8 +212,8 @@ Base of `RemoteMethod` and `RemoteSkill`. Parent: `BaseRemoteComponent`.
 
 ### 2.11 `RemoteVariableContainer[_ParentType]` and subclasses (`client/remote_variable_container.py:26-146`)
 - ctor `(*, name, ua_node: Node|None, parent, server, **kw)`. Subclasses are constructed with `ua_node=None`; the parent sets `container.ua_node = child` before calling `init()`.
-- `_init`: for each child, if the server registry already holds a `RemoteVariable` for that NodeId, that object is **reused**. Otherwise a new `RemoteVariable` is created, `init()`ed and `ua_read_type()`d (`:52-64`).
-- `async read_all() -> Mapping[str, Any]` reads **sequentially**, one request per variable (`:66-68`). `async write_all(Mapping[str, Any])` writes sequentially and raises `KeyError` for unknown names (`:70-73`).
+- `_init`: for each child, if the server registry already holds a `RemoteVariable` for that NodeId, that object is reused. Otherwise a new `RemoteVariable` is created, `init()`ed and `ua_read_type()`d (`:52-64`).
+- `async read_all() -> Mapping[str, Any]` reads sequentially, one request per variable (`:66-68`). `async write_all(Mapping[str, Any])` writes sequentially and raises `KeyError` for unknown names (`:70-73`).
 - `dto() -> list[RemoteVariableDTO]` returns `[]` if the container is not initialized (`:75-79`).
 - Python container protocol: `__getitem__` (KeyError with path), `__contains__`, `__len__`, `__iter__` over the `RemoteVariable`s (`:85-106`).
 - Subclasses with fixed names: `Attributes`, `Identification`, `Monitoring`, `ParameterSet`, `FinalResultData` (`:109-146`).
@@ -264,7 +262,7 @@ Fields: `message: str`, `severity: int` (0 to 1000), `error_code: str` (may be e
 | `RemoteComponentDTO` | + current_state, lock: RemoteLockDTO\|None, attributes, identification, monitoring, parameter_set, skill_set: list[RemoteSkillDTO], method_set: list[RemoteCallableDTO], components (recursive), resources | `:117-132` |
 | `RemoteMachineDTO` | + users | `:135-139` |
 
-DTOs are snapshots built from **cached** values; `dto()` performs no I/O. `feasibility_check_set` and `precondition_check_set` are **not** included in any DTO. The JSON conversion (datetime to ISO, path to str) is left to the user (`osc/examples/dto.py:16-32`).
+DTOs are snapshots built from cached values; `dto()` performs no I/O. `feasibility_check_set` and `precondition_check_set` are not included in any DTO. The JSON conversion (datetime to ISO, path to str) is left to the user (`osc/examples/dto.py:16-32`).
 
 ### 2.17 `BrowseFeature` / `BrowseRule` (`client/browse.py`)
 - `BrowseFeature(Flag)`: `MACHINES, COMPONENTS, LOCK, RESOURCES, USERS, SKILL_SET, METHOD_SET, ATTRIBUTES, IDENTIFICATION, MONITORING, PARAMETER_SET, FINAL_RESULT_DATA` (`:16-33`).
@@ -275,9 +273,7 @@ DTOs are snapshots built from **cached** values; `dto()` performs no I/O. `feasi
 - `DEFAULT_BROWSE_RULE = BrowseRule(match_all, ~BrowseFeature(0))` enables every feature (`:114-117`).
 
 ### 2.18 Core `Signal[P]` (`core/signal.py:16-36`)
-`connect(cb)`, `disconnect(cb)` (both use a set, so callbacks are de-duplicated and order is undefined), and `async send(*args)`. `send` snapshots the callbacks and awaits them **concurrently** with `asyncio.gather` (without `return_exceptions`), so an exception in one callback propagates to the sender. For data-change signals that sender is the SubscriptionManager, which logs and swallows handler exceptions (`core/subscription_manager.py:418-421`).
-
----
+`connect(cb)`, `disconnect(cb)` (both use a set, so callbacks are de-duplicated and order is undefined), and `async send(*args)`. `send` snapshots the callbacks and awaits them concurrently with `asyncio.gather` (without `return_exceptions`), so an exception in one callback propagates to the sender. For data-change signals that sender is the SubscriptionManager, which logs and swallows handler exceptions (`core/subscription_manager.py:418-421`).
 
 ## 3. Browsing
 
@@ -300,10 +296,10 @@ DTOs are snapshots built from **cached** values; `dto()` performs no I/O. `feasi
 | `MethodSet` | METHOD_SET | each child becomes a `RemoteMethod` (`:266-283`) |
 | anything else | – | warning log (`:360-361`) |
 
-All sub-browses for one object run concurrently through `common.gather`. `ConnectionError`, `TimeoutError` and non-`Exception` BaseExceptions are raised; any other `Exception` is **collected** into `init_exceptions` and the failed child is simply missing (`client/common.py:16-33`). Errors from component, resource, method and variable children get a note naming the node (`add_note`).
+All sub-browses for one object run concurrently through `common.gather`. `ConnectionError`, `TimeoutError` and non-`Exception` BaseExceptions are raised; any other `Exception` is collected into `init_exceptions` and the failed child is simply missing (`client/common.py:16-33`). Errors from component, resource, method and variable children get a note naming the node (`add_note`).
 
 **Path model used by the rules** (derived from `BaseUaObject.path`, `core/base_ua_object.py:91-97`):
-- Machine: `/M`. Component: `/M/C` (the `Components` folder is **not** a path segment). Nested component: `/M/C/C2`. Resource: `/M/R`. Skill or method: `/M/SkillName` (parent is the component; `SkillSet`/`MethodSet` are not segments). Lock: `/M/Lock`. Container: `/M/ParameterSet`. Variable: `/M/C/Monitoring/Var`.
+- Machine: `/M`. Component: `/M/C` (the `Components` folder is not a path segment). Nested component: `/M/C/C2`. Resource: `/M/R`. Skill or method: `/M/SkillName` (parent is the component; `SkillSet`/`MethodSet` are not segments). Lock: `/M/Lock`. Container: `/M/ParameterSet`. Variable: `/M/C/Monitoring/Var`.
 - Rules are evaluated at the server (MACHINES on `/M`), at each component, machine or resource (`self.path`), and at each callable (for MONITORING, PARAMETER_SET and FINAL_RESULT_DATA; `client/remote_callable.py:60`). Locks, containers, variables and users do not evaluate rules themselves.
 - Consequence (example `osc/examples/browse_rules.py:17-29`): `match_name("DummyMachine")` grants COMPONENTS and SKILL_SET only to `/DummyMachine`. Its components receive only what `match_all` grants.
 
@@ -315,8 +311,6 @@ All sub-browses for one object run concurrently through `common.gather`. `Connec
 - All state (variable values, skill and component states, lock fields, user presence) is cached and updated by subscription. There is no re-browse after a reconnect (§2.2).
 
 **Type resolution**: `ua_type` is the BrowseName.Name of the HasTypeDefinition target, or `"UNKNOWN"` (`core/ua_node_util.py:131-146`).
-
----
 
 ## 4. Information model expected by the client
 
@@ -378,8 +372,6 @@ Notes:
 - **`Requirements` placement is unclear.** The SkillSet nodeset declares `Requirements` on `BaseSkillType` (`nodesets/Opc.Ua.SmartFactory.SkillSet.NodeSet2.xml:276`, parent `ns=2;i=1001`). The client looks for it only among the children of `SkillExecution` (`client/remote_callable.py:85-86`). The server's `RequirementsMixin` resolves it via `self.ua_node` (`server/mixins/requirements_mixin.py:57-67`), which for callables is the sub-node once it is set. Whether a declared `Requirements` sits at skill level or SkillExecution level in practice depends on when `_init_requirements` runs; this was not verified.
 - State, method and variable child names come from the nodesets: state machine `Start`/`Halt`/`Reset`/`Suspend` at `Opc.Ua.SmartFactory.MachineSet.NodeSet2.xml:1197,1272,1332,1365`; `Call` at `Opc.Ua.SmartFactory.SkillSet.NodeSet2.xml:776`; `MinAccessLevel` at `:836,:846`.
 
----
-
 ## 5. Skill state machine
 
 **States** (`core/ua_enums.py:21-60`; `SkillState` value = `(id, text)`):
@@ -412,22 +404,20 @@ The state node objects in the nodeset are children of `SkillStateMachineType` ns
 | (internal, finite) | RUNNING → COMPLETING → COMPLETED | – | `done_internal` |
 
 - A failure in any handler triggers `halt` (`:175-200`, `fail_trigger="halt"`).
-- "Access allowed" requires either an Admin role, or a `current_access_level >= MinAccessLevel` **and** being the owner of the lock. Otherwise the server raises `BadUserAccessDenied` / `BadRequiresLock` (code `E123`) (`server/base_callable.py:118-134`).
+- "Access allowed" requires either an Admin role, or a `current_access_level >= MinAccessLevel` and being the owner of the lock. Otherwise the server raises `BadUserAccessDenied` / `BadRequiresLock` (code `E123`) (`server/base_callable.py:118-134`).
 - Results of the server method call (`server/ua_fsm.py:94-117`): Good. A wrong state gives `BadInvalidState`. A condition failure gives its UaStatusCode. Any other error gives `BadInternalError`.
 - The client calls `call_method(StateMachine, <Start|Reset|Halt|Suspend NodeId>)` with no arguments (`client/remote_skill.py:156,166,173,184`). A bad status code surfaces as an asyncua `UaStatusCodeError` subclass.
 - `Suspend` exists only on suspendable skills. The server deletes it otherwise (`server/base_skill.py:90-99`), and the client derives `suspendable` from its presence.
 - The server enforces that a machine has a continuous `StartupSkill` (`server/base_machine.py:78-93`). In the examples the client starts it before other skills (`osc/examples/example.py:36-41`).
 
 **How `wait=True` works** (`client/remote_skill.py:150-215`):
-1. The current `_halt_count` (incremented on every transition into HALTED) is captured **before** the method call.
+1. The current `_halt_count` (incremented on every transition into HALTED) is captured before the method call.
 2. The method is called.
 3. Under an `asyncio.Condition` the client waits until the cached `current_state` (updated only by the CurrentState subscription, `:217-238`) is in the target set, or until `_halt_count` has grown when HALTED is not a target. In the halt case it raises `SkillHaltedError`.
 
 Targets: start → {RUNNING, COMPLETED}; reset → {READY}; halt → {HALTED}; suspend → {SUSPENDED}.
 
-There is **no timeout**; callers must wrap the call in `asyncio.timeout`. Because the wait checks only the latest cached state, a fast finite skill that passes RUNNING still satisfies the wait through COMPLETED. **`start(wait=True)` does not wait for completion of a finite skill**, only until it is RUNNING or COMPLETED. The README and quick_start comment "start the skill and wait for completion" (`osc/README.md:63-64`, `osc/examples/quick_start.py:30-31`) is therefore inaccurate for skills that stay in RUNNING for a while. If the cached state already equals a target state before the call (e.g. `reset(wait=True)` while READY is cached), the wait returns immediately.
-
----
+There is no timeout; callers must wrap the call in `asyncio.timeout`. Because the wait checks only the latest cached state, a fast finite skill that passes RUNNING still satisfies the wait through COMPLETED. **`start(wait=True)` does not wait for completion of a finite skill**, only until it is RUNNING or COMPLETED. The README and quick_start comment "start the skill and wait for completion" (`osc/README.md:63-64`, `osc/examples/quick_start.py:30-31`) is therefore inaccurate for skills that stay in RUNNING for a while. If the cached state already equals a target state before the call (e.g. `reset(wait=True)` while READY is cached), the wait returns immediately.
 
 ## 6. Lock semantics
 
@@ -453,7 +443,7 @@ There is **no timeout**; callers must wrap the call in `asyncio.timeout`. Becaus
   - If remaining > max, the max is raised to remaining.
   - If remaining ≥ `max * renew_threshold`, the throttle is re-armed and nothing fires.
   - Otherwise `renew_due(remaining)` fires, at most once per `renew_retry_seconds` (monotonic clock).
-- `read_state(update_cache=True)` reads the 4 values in **one** Read request through `ua_read_values`. A bad status or a null value raises `OpenSmiRuntimeError` (`client/common.py:36-56`). When unlocked, user, client and remaining are normalized to empty/None. The method returns `RemoteLockState` and optionally applies it to the cache (`:459-509`).
+- `read_state(update_cache=True)` reads the 4 values in one Read request through `ua_read_values`. A bad status or a null value raises `OpenSmiRuntimeError` (`client/common.py:36-56`). When unlocked, user, client and remaining are normalized to empty/None. The method returns `RemoteLockState` and optionally applies it to the cache (`:459-509`).
 - "Locking user" means the user name; `locked_by_us` compares it with `RemoteServer.username` (`:176-182`).
 - Priority: the client has no priority API. The priority is visible only as `RemoteUser.data.user_level` (a string, `client/remote_user.py:37-38`).
 
@@ -465,10 +455,8 @@ There is **no timeout**; callers must wrap the call in `asyncio.timeout`. Becaus
 - `on_renew_due`: starts at most one renew task at a time, which calls `renew_lock()` with a 5 s timeout and only logs errors (`:108-120`).
 - `unlock()` deactivates, disconnects the handlers, cancels the tasks and calls `exit_lock()` if `locked_by_us`, logging any error (`:52-74`).
 - Edge cases (inferred from the code):
-  - The loop condition `not locked_by_us` reads the **cached** state, so right after a successful `init_lock` the loop exits through `break`. A failure is retried.
+  - The loop condition `not locked_by_us` reads the cached state, so right after a successful `init_lock` the loop exits through `break`. A failure is retried.
   - Re-locking after a reconnect relies on the `LockingUser` notification.
-
----
 
 ## 7. Subscriptions, notifications, history and security
 
@@ -513,13 +501,11 @@ Users react through the Signals in §2. There is no per-subscription publishing 
 
 **Security policy** (`client/remote_server.py:325-349`):
 - `security_policy: asyncua.ua.SecurityPolicyType`. With `NoSecurity` nothing is configured.
-- Otherwise, on **every connect**, the client generates a fresh private key and a self-signed certificate: CN "OpenSMI Python Client", SAN = application_uri, EKU serverAuth+clientAuth, valid 3650 days. It then calls `set_security(policy, cert, key, mode)` using `SECURITY_POLICY_TYPE_MAP`.
+- Otherwise, on every connect, the client generates a fresh private key and a self-signed certificate: CN "OpenSMI Python Client", SAN = application_uri, EKU serverAuth+clientAuth, valid 3650 days. It then calls `set_security(policy, cert, key, mode)` using `SECURITY_POLICY_TYPE_MAP`.
 - There is no option to load a certificate from a file (TODO `:329`), and no server-certificate pinning or trust list is configured. Whether asyncua validates the server certificate in this mode was not verified.
 - Authentication is always username/password.
 - On the server side, NoSecurity is disabled when `config.encryption` is set (`server/_server.py:266-295`).
 - Example: `Aes256Sha256RsaPss_SignAndEncrypt` (`osc/examples/security_policy.py:19-24`).
-
----
 
 ## 8. Errors and exceptions
 
@@ -561,8 +547,6 @@ ValueError
 - Signal-handler exceptions on data change or event are logged and dropped by the SubscriptionManager (`core/subscription_manager.py:418-421`, `:439-442`).
 - A failure to load custom data types only produces a warning (`client/remote_server.py:358-364`). A failed `MaxInactiveLockTime` read falls back to the default (`client/remote_lock.py:302-313`).
 
----
-
 ## 9. Examples (`osc/examples/`)
 
 | File | Feature shown |
@@ -581,8 +565,6 @@ ValueError
 | `subscription_variable.py` | `value_changed` on every variable of a component's `monitoring` (`:13-21`) |
 
 Dummy server credentials used in the examples: `visitor`, `operator` and `orchestrator` (same string as the password) on `opc.tcp://localhost:4843/`.
-
----
 
 ## Appendix: other core modules
 - `core/ua.py:12-17`: `NodeIdDefinition(ns_uri, id: Int32)`, an unresolved NodeId resolved through `BaseServer.ua_get_node_id`.

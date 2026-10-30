@@ -1,37 +1,35 @@
 # Skill-Sharp-Client (SSC) inventory, as input for the OpenSMI C# client migration
 
+Note: this is an analysis snapshot of the old Skill-Sharp-Client at `e57b3c0`, taken on 2026-10-29; that code now lives in `legacy/`. It is not updated and does not describe the new `OpenSmi.Client`.
+
 Source: `scratchpad/src/ssc` (shallow clone of `github.com/BBlumhofer/Skill-Sharp-Client`, `main` @ `e57b3c0` "minor", 2026-02-13; only one commit is visible because the clone is shallow).
 All paths below are relative to the repo root. `file:a-b` means a line range. "IMAPRO" means `C:\Users\BenjaminBlumhofer\Repos\DissCode\IMAPRO`.
-
----
 
 ## 1. Project and solution structure
 
 | Item | Value | Source |
 |---|---|---|
-| Solution | `cs_client.slnx` (new XML solution format) with 2 projects: `UAClient/UAClient.csproj` and `UAClient.Tests/UAClient.Tests.csproj`. `Tools/RemoteInspector` is **not** in the solution. A second `UAClient.Tests/UAClient.Tests.slnx` contains only the test project. | `cs_client.slnx:1-4`, `UAClient.Tests/UAClient.Tests.slnx` |
+| Solution | `cs_client.slnx` (new XML solution format) with 2 projects: `UAClient/UAClient.csproj` and `UAClient.Tests/UAClient.Tests.csproj`. `Tools/RemoteInspector` is not in the solution. A second `UAClient.Tests/UAClient.Tests.slnx` contains only the test project. | `cs_client.slnx:1-4`, `UAClient.Tests/UAClient.Tests.slnx` |
 | Library project | `UAClient/UAClient.csproj`: `OutputType=Library`, `TargetFramework=net10.0`, `Nullable=enable`, `ImplicitUsings=enable` | `UAClient/UAClient.csproj:4-8` |
 | Assembly / PackageId | `AssemblyName=SkillSharp.Client`, `RootNamespace=SkillSharp.Client`, `PackageId=SkillSharp.Client`, `Version=1.0.0`, Description "OPC UA Client Library for Skill-based Manufacturing Systems" | `UAClient.csproj:9-13` |
 | Odd build props | `GenerateRuntimeConfigurationFiles=true`, `CopyLocalLockFileAssemblies=true` (exe-style settings on a library) | `UAClient.csproj:15-16` |
-| NuGet deps (library) | `OPCFoundation.NetStandard.Opc.Ua.Client` **1.5.377.22**, `OPCFoundation.NetStandard.Opc.Ua.Core` **1.5.377.22** (nothing else; no `Microsoft.Extensions.Logging`) | `UAClient.csproj:20-21` |
+| NuGet deps (library) | `OPCFoundation.NetStandard.Opc.Ua.Client` 1.5.377.22, `OPCFoundation.NetStandard.Opc.Ua.Core` 1.5.377.22 (nothing else; no `Microsoft.Extensions.Logging`) | `UAClient.csproj:20-21` |
 | Test project | `net10.0`, `IsPackable=false`, `Microsoft.NET.Test.Sdk` 18.0.1, `xunit` 2.8.1, `xunit.runner.visualstudio` 2.8.0, ProjectReference `..\UAClient\UAClient.csproj` | `UAClient.Tests/UAClient.Tests.csproj` |
 | Tool | `Tools/RemoteInspector/RemoteInspector.csproj`: Exe, net10.0, ProjectReference `..\..\UAClient\UAClient.csproj`; reads `config.json` | `Tools/RemoteInspector/*` |
-| C# namespaces | `UAClient.Client` (all `Client/*.cs`), `UAClient.Common` (`Common/*.cs`), `UAClient` (`Program.cs`), `UAClient.Tests`. They do **not** match the `RootNamespace`/assembly name `SkillSharp.Client`. | e.g. `Client/RemoteServer.cs:10`, `Common/Enums.cs:1`, `Program.cs:10` |
+| C# namespaces | `UAClient.Client` (all `Client/*.cs`), `UAClient.Common` (`Common/*.cs`), `UAClient` (`Program.cs`), `UAClient.Tests`. They do not match the `RootNamespace`/assembly name `SkillSharp.Client`. | e.g. `Client/RemoteServer.cs:10`, `Common/Enums.cs:1`, `Program.cs:10` |
 | Size | Library: 6,933 LoC (Client 6,458 + Common 93 + Program 401). Tests: 1,182 LoC. Tool: 246 LoC. | `wc -l` |
 
 ### Build/test status (run on a clean copy in `scratchpad/ssc-build`, bin/obj/.vs removed)
 
-- **Library builds**: `dotnet build UAClient/UAClient.csproj --no-incremental` -> success, **0 errors, 54 warnings**: CS8604 x14, CS8602 x12, CS8600 x10 (nullability), **CS0618 x7** (obsolete sync `SessionClient.Read(...)` and `Session.Close(...)`), CS0649 x3 / CS0414 x3 / CS0169 x2 (unused or never-assigned fields), CS8765, CS8618, **CS0108** (`RemotePort.CurrentState` hides `RemoteComponent.CurrentState`).
+- **Library builds**: `dotnet build UAClient/UAClient.csproj --no-incremental` -> success, **0 errors, 54 warnings**: CS8604 x14, CS8602 x12, CS8600 x10 (nullability), CS0618 x7 (obsolete sync `SessionClient.Read(...)` and `Session.Close(...)`), CS0649 x3 / CS0414 x3 / CS0169 x2 (unused or never-assigned fields), CS8765, CS8618, CS0108 (`RemotePort.CurrentState` hides `RemoteComponent.CurrentState`).
 - **Solution build fails offline here**: `NU1100 Microsoft.NET.Test.Sdk (>= 18.0.1)` cannot be resolved. This environment has *no NuGet sources configured* (`dotnet nuget list source` -> none), so only the local cache is available. xunit 2.8.1 and runner 2.8.0 were also missing; NU1603 resolved them to 2.9.2 and 2.8.2. This is an environment problem, not a code defect.
 - **Tests**: with `Microsoft.NET.Test.Sdk` changed to the cached 17.14.1 *in the scratch copy only*: **18/18 passed in 280 ms**. 7 of the 18 are integration tests that `return` early unless `RUN_INTEGRATION_TESTS=1`, so they pass without running anything (see §5). No live OPC UA server was contacted.
-- Test-project analyzer warnings worth noting: **CA2021** at `FullIntegrationTests.cs:86,194` and `StoreSkillFinalResultTests.cs:152`. `MethodSet.Values.OfType<RemoteSkill>()` is always empty because `MethodSet` is `Dictionary<string, RemoteMethod>` and `RemoteMethod`/`RemoteSkill` are sibling types, so those fallback lookups are dead code. There are also 4x xUnit2020 warnings.
-
----
+- Test-project analyzer warnings: CA2021 at `FullIntegrationTests.cs:86,194` and `StoreSkillFinalResultTests.cs:152`. `MethodSet.Values.OfType<RemoteSkill>()` is always empty because `MethodSet` is `Dictionary<string, RemoteMethod>` and `RemoteMethod`/`RemoteSkill` are sibling types, so those fallback lookups are dead code. There are also 4x xUnit2020 warnings.
 
 ## 2. Per-class inventory
 
 Threading conventions used across the library (applies everywhere unless noted):
-- Everything is `async Task`. There is no `CancellationToken` parameter on **any** public API; every SDK call passes `CancellationToken.None`.
+- Everything is `async Task`. There is no `CancellationToken` parameter on any public API; every SDK call passes `CancellationToken.None`.
 - Pervasive `try { ... } catch { }` with silent swallowing: hundreds of empty catches in total.
 - The public maps are plain `Dictionary<,>` exposed as `IDictionary<,>`. Some are written from parallel `Task.Run` workers, sometimes under ad-hoc locks (`lock(dictLock)`, `lock(nameMapping)`) and sometimes without any lock.
 - Logging goes to the static `UAClient.Common.Log`, i.e. `Console.WriteLine`. There is no `ILogger`.
@@ -42,7 +40,7 @@ Threading conventions used across the library (applies everywhere unless noted):
 | Member | Signature | Line |
 |---|---|---|
 | ctor | `UaClient(string url, string username = "", string password = "")` | 122 |
-| ConnectAsync | `Task ConnectAsync(uint sessionTimeout = 60000)`. Returns early if already connected. Builds an `ApplicationConfiguration` in code, discovers endpoints, picks the **highest SecurityLevel**, and on failure falls back to SecurityPolicy None. | 129-244 |
+| ConnectAsync | `Task ConnectAsync(uint sessionTimeout = 60000)`. Returns early if already connected. Builds an `ApplicationConfiguration` in code, discovers endpoints, picks the highest SecurityLevel, and on failure falls back to SecurityPolicy None. | 129-244 |
 | DisconnectAsync | `Task DisconnectAsync()` | 344-358 |
 | Session | `Session? Session { get; }` (concrete `Session`, not `ISession`) | 360 |
 | Configuration | `ApplicationConfiguration? Configuration { get; }` | 362 |
@@ -58,7 +56,7 @@ Bugs and smells:
 - **`CallMethodAsync` always returns `null` and swallows every exception** (`UaClient.cs:422-431`). Output arguments are discarded and failures are invisible.
 - `Dispose()` does sync-over-async with `DisconnectAsync().Wait()` (436).
 - Security config is hard-coded: `AutoAcceptUntrustedCertificates = true` and `AddAppCertToTrustedStore = true` (140-141). Cert stores sit under `CertificateStores/...` *relative to the CWD* (142-155). `ApplicationName = "UAClient"` is a constant (136). Because lock ownership is matched against this name, every instance of the library looks like the same client (see `RemoteModule.LockAsync`).
-- Sessions are created by **reflection** over `DefaultSessionFactory`/`SessionFactory.CreateAsync`, with argument defaults guessed per parameter type (`CreateSessionCompatAsync`, 246-342). Every `bool` argument is set to `false` and every `string` to `"UAClientSession"`. This is fragile across SDK versions.
+- Sessions are created by reflection over `DefaultSessionFactory`/`SessionFactory.CreateAsync`, with argument defaults guessed per parameter type (`CreateSessionCompatAsync`, 246-342). Every `bool` argument is set to `false` and every `string` to `"UAClientSession"`. This is fragile across SDK versions.
 - A default `Subscription` with a 1000 ms publishing interval is created on every new session (322-328), and the SubscriptionManager also creates its own.
 - An unconditional `Task.Delay(200)` runs after session creation (337).
 - Smaller issues: the indentation of `ConnectAsync`/`CreateSessionCompatAsync` is broken (207-342), and `TransportQuotas.OperationTimeout=15000` is hard-coded.
@@ -94,17 +92,17 @@ Bugs and smells:
 - **Two concurrent reconnect mechanisms**: the polling loop calls `_client.ConnectAsync()` and re-browses (355-415), while the SDK handler swaps the session (546-580). Both then run the full re-discovery plus `EnableAutoRecoveryAsync` plus `EnsureRecoveryAsync` on every module (391-403, 445-457).
 - **Re-discovery after reconnect creates new `RemoteModule` objects** (`IterateMachinesAsync` -> `_modules[name] = new RemoteModule(...)`, 233-234). Callers that hold the old instances (IMAPRO did) keep stale objects. The old modules' auto-recovery handlers are still re-bound by `RebindSubscriptionsAsync`, so recovery can fire twice.
 - The server-time subscription on node `i=2258` has an empty handler, and `OnServerTimeUpdate` is never invoked (108-116, 24).
-- Module detection is heuristic. A node becomes a "module" if its TypeDefinition BrowseName **contains** `"Machine"` (226), and if neither the Machinery `Machines` folder nor SFM `ModuleSet` exists, any Objects child whose DisplayName contains "Module" or "Machine" is used as the module set (159-169).
+- Module detection is heuristic. A node becomes a "module" if its TypeDefinition BrowseName contains `"Machine"` (226), and if neither the Machinery `Machines` folder nor SFM `ModuleSet` exists, any Objects child whose DisplayName contains "Module" or "Machine" is used as the module set (159-169).
 - `DiscoverComponentsAsync` treats **module `Methods` entries** as component candidates (281-329). The "Methods" map actually holds skills and methods (see `RemoteModule`), so its contents are mixed.
 - `Dispose` does not await the loop task, does not dispose `_client`, and calls the sync-over-async `SubscriptionManager.Dispose()`.
 - The obsolete sync `session.Read(...)` is used (216).
 
-### 2.3 `RemoteModule` (`Client/RemoteModule.cs`, **2,127 lines**, a god class)
+### 2.3 `RemoteModule` (`Client/RemoteModule.cs`, 2,127 lines, a god class)
 **Purpose:** one machine/module. It handles discovery of everything under the module (lock, ports, storages, components, skills, monitoring) and module lifecycle (lock, couple, startup skill, readiness, auto-relock, auto-recovery), plus SmartFactory resource resolution and neighbor extraction.
 
 | Member | Signature | Line |
 |---|---|---|
-| AllowLockFallback | `bool AllowLockFallback { get; set; }`. **Never read** by the library; only `Program.cs` sets it. | 14 |
+| AllowLockFallback | `bool AllowLockFallback { get; set; }`. Never read by the library; only `Program.cs` sets it. | 14 |
 | Name / BaseNodeId | `string Name`, `NodeId BaseNodeId` | 16-17 |
 | Methods | `IDictionary<string, BaseRemoteCallable> Methods`. A mixed bag: `name` -> `RemoteMethod` and `"skill:"+name` -> `RemoteSkill` for the same node. | 18 |
 | Lock | `RemoteLock? Lock { get; private set; }` | 19 |
@@ -124,7 +122,7 @@ Bugs and smells:
 | SetupSubscriptionsAsync | `Task SetupSubscriptionsAsync(SubscriptionManager? subscriptionManager = null, bool createSubscriptions = true)` | 1023-1104 |
 | ResolveResourceNodeIdsAsync | `Task ResolveResourceNodeIdsAsync()` | 1112-1302 |
 | SubscribeCoreAsync | `Task SubscribeCoreAsync(SubscriptionManager)` | 1305-1363 |
-| CoupleAsync | `Task CoupleAsync(TimeSpan? timeout = null)`. Couples the **first** port only. | 1368-1389 |
+| CoupleAsync | `Task CoupleAsync(TimeSpan? timeout = null)`. Couples the first port only. | 1368-1389 |
 | LockAsync | `Task<bool?> LockAsync(Session session)` | 1391-1538 |
 | UnlockAsync | `Task<bool?> UnlockAsync(Session session)` | 1540-1564 |
 | StartAsync | `Task StartAsync(bool reset = true, TimeSpan? timeout = null, bool couple = true)`. Starts the "Startup" skill. | 1569-1621 |
@@ -132,7 +130,7 @@ Bugs and smells:
 | MakeReadyAsync | `Task<bool> MakeReadyAsync(TimeSpan? timeout = null)` | 1679-1712 |
 | EnableAutoRecoveryAsync / DisableAutoRecoveryAsync / EnsureRecoveryAsync | `Task EnableAutoRecoveryAsync()`, `Task DisableAutoRecoveryAsync()`, `Task EnsureRecoveryAsync(string reason = "ManualEnsureRecovery")` | 1770-1860 / 1862-1885 / 1892-1906 |
 
-Private helpers: `ExtractNeighborIdFromPartnerRfidTag` (82-101), `RefreshNeighborsFromPorts` (103-124), `OnLockStateChangedAsync` (192-259), `GetTypeDefinitionAsync` (280-300), `GetBrowseNameAsync` (302-318), `BrowseAndLogNodeRecursive` (322-417, **unused**), `CreateRemoteObjectFromTypeDefinitionAsync` (419-708), `IsTypeOrSubtypeOfAsync` (1714-1751), `OnRecoveryLockChangedAsync` (1908-1966), `OnRecoveryStartupChangedAsync` (1968-2000), `TriggerRecoveryAsync` (2002-2125).
+Private helpers: `ExtractNeighborIdFromPartnerRfidTag` (82-101), `RefreshNeighborsFromPorts` (103-124), `OnLockStateChangedAsync` (192-259), `GetTypeDefinitionAsync` (280-300), `GetBrowseNameAsync` (302-318), `BrowseAndLogNodeRecursive` (322-417, unused), `CreateRemoteObjectFromTypeDefinitionAsync` (419-708), `IsTypeOrSubtypeOfAsync` (1714-1751), `OnRecoveryLockChangedAsync` (1908-1966), `OnRecoveryStartupChangedAsync` (1968-2000), `TriggerRecoveryAsync` (2002-2125).
 
 Threading:
 - **`lock(this)`** is used at 21, 50-51, 119 and 129.
@@ -142,9 +140,9 @@ Threading:
 
 Bugs and smells:
 - `DiscoverMethodsAsync` claims to be BFS, but **children are never enqueued** (queue only contains `BaseNodeId`, 717-720), so discovery goes exactly one level deep, plus special-case descents into `MachineComponents` and `SkillSet`.
-- The module's `SkillSet` is filled **only** when a direct child `SkillSet` exists (900-952). Skills found by the "name contains Skill" heuristic go only into `Methods` (955-963). But `StartAsync`, `EvaluateReadyAsync` and the recovery code look up the startup skill in `Methods.Values.OfType<RemoteSkill>()` (1580-1582, 1663, 1823-1825, 1974-1976, 2086-2088), while IMAPRO looked in `SkillSet`. The two can disagree.
+- The module's `SkillSet` is filled only when a direct child `SkillSet` exists (900-952). Skills found by the "name contains Skill" heuristic go only into `Methods` (955-963). But `StartAsync`, `EvaluateReadyAsync` and the recovery code look up the startup skill in `Methods.Values.OfType<RemoteSkill>()` (1580-1582, 1663, 1823-1825, 1974-1976, 2086-2088), while IMAPRO looked in `SkillSet`. The two can disagree.
 - Every skill is registered twice (`Methods[name] = new RemoteMethod(sameNode)` and `Methods["skill:"+name] = skill`, 936-937, 960-961, 997-998, 837-838), so `SetupSubscriptionsAsync` subscribes the same nodes twice (1041-1044).
-- `SetupSubscriptionsAsync(..., createSubscriptions:false)` (as called by `RemoteServer`, 251) **still creates subscriptions** for all methods and skills, because it calls `m.SetupSubscriptionsAsync(subscriptionManager, true)` (1043).
+- `SetupSubscriptionsAsync(..., createSubscriptions:false)` (as called by `RemoteServer`, 251) still creates subscriptions for all methods and skills, because it calls `m.SetupSubscriptionsAsync(subscriptionManager, true)` (1043).
 - **Lock ownership check is unsound.** `OwnedByUs` treats an owner string as ours if it contains our ApplicationName (always `"UAClient"`), our hostname, machine name or any local IP, or `localhost`/`127.0.0.1`/`::1` (1411-1477). If the owner cannot be read, it **assumes the lock is ours** (1521-1529). Any two SSC clients on the same host, or any two SSC instances at all, see each other's lock as their own.
 - `StartAsync` uses `dynamic` casts (1607, 1612-1613) to call methods that exist statically. Its `reset` flag only changes a log line (1598-1601).
 - `MakeReadyAsync` may create a throw-away `SubscriptionManager` (1685).
@@ -162,7 +160,7 @@ Bugs and smells:
 | RemoteServerClient | `protected UaClient RemoteServerClient` | 15 |
 | FinalResultData / Monitoring / ParameterSet | `IDictionary<string, RemoteVariable>` (case-insensitive) | 18-20 |
 | ctor | `protected BaseRemoteCallable(string name, NodeId baseNodeId, UaClient client)` | 32-37 |
-| SetupSubscriptionsAsync | `virtual Task SetupSubscriptionsAsync(SubscriptionManager? subscriptionManager, bool createSubscriptions = true)`. Browses **direct** children named FinalResultData, Monitoring or ParameterSet. | 40-128 |
+| SetupSubscriptionsAsync | `virtual Task SetupSubscriptionsAsync(SubscriptionManager? subscriptionManager, bool createSubscriptions = true)`. Browses direct children named FinalResultData, Monitoring or ParameterSet. | 40-128 |
 | AddSubscriber | `void AddSubscriber(Action<RemoteVariable> callback)`. Called only on FinalResultData changes. | 154-157 |
 | SubscribeCoreAsync | `virtual Task SubscribeCoreAsync(SubscriptionManager)` | 160-176 |
 | DataChangeNotification | `virtual void DataChangeNotification(NodeId, DataValue, MonitoredItemNotificationEventArgs)` | 178-204 |
@@ -178,9 +176,9 @@ Smells: creates its own `SubscriptionManager` when it is passed `null` (43-51). 
 | ctor | `RemoteMethod(string name, NodeId baseNodeId, UaClient client)` | 11-13 |
 | CallAsync | `Task<IDictionary<string, object?>> CallAsync(params object[] inputs)` | 15-74 |
 
-Bugs: `CallAsync` browses `HasComponent` **children of BaseNodeId** to find a method named "Call" or the first one (19-49). Most `RemoteMethod`s are constructed with the *method node itself* as BaseNodeId (`RemoteModule.cs:487, 553, 1008`, `RemoteComponent.cs:355`). For those, the browse finds nothing and the call throws "No method found to call". It also passes BaseNodeId as the `ObjectId`. **Output arguments are discarded**: it returns a re-read of `FinalResultData` instead (61-73).
+Bugs: `CallAsync` browses `HasComponent` children of BaseNodeId to find a method named "Call" or the first one (19-49). Most `RemoteMethod`s are constructed with the *method node itself* as BaseNodeId (`RemoteModule.cs:487, 553, 1008`, `RemoteComponent.cs:355`). For those, the browse finds nothing and the call throws "No method found to call". It also passes BaseNodeId as the `ObjectId`. **Output arguments are discarded**: it returns a re-read of `FinalResultData` instead (61-73).
 
-### 2.6 `RemoteSkill` (`Client/RemoteSkill.cs`, **1,508 lines**)
+### 2.6 `RemoteSkill` (`Client/RemoteSkill.cs`, 1,508 lines)
 **Purpose:** a skill instance. It discovers the SkillExecution/StateMachine nodes, tracks state (cached via subscription, with a read fallback), handles parameters, final results and monitoring, and implements Start/Halt/Reset/Execute with heuristics.
 
 | Member | Signature | Line |
@@ -231,7 +229,7 @@ Also defined in this file: `interface IRemoteComponentSubscriber { void OnStateC
 |---|---|---|
 | Name / BaseNodeId | `string Name { get; protected set; }`, `NodeId BaseNodeId { get; protected set; }` | 20-21 |
 | SkillSet | `IDictionary<string, RemoteSkill>` | 26 |
-| FeasibilityCheckSet / PreconditionCheckSet | `IDictionary<string, RemoteSkill>`. **Never populated.** | 27-28 |
+| FeasibilityCheckSet / PreconditionCheckSet | `IDictionary<string, RemoteSkill>`. Never populated. | 27-28 |
 | Components | `IDictionary<string, RemoteComponent>` | 29 |
 | MethodSet | `IDictionary<string, RemoteMethod>` | 30 |
 | Attributes / Monitoring / ParameterSet | `IDictionary<string, RemoteVariable>` | 33-35 |
@@ -271,7 +269,7 @@ Bugs:
 | Variables / NodeMap | aliases for `Attributes` / `_attribute_nodes` | 312-313 |
 | Methods / MethodsNodeMap | `IDictionary<string, BaseRemoteCallable>`, `IDictionary<NodeId, BaseRemoteCallable>` | 316-317 |
 
-Smells: `internal static RemoteModuleHelper.GetUaClientFromModule` reads `RemoteModule._client` **by reflection** (320-326). The `client` parameters are redundant because the base already has a client. `client.Session` is used without a null check (176, 181, 210, 217, 271, 275). The Reset/Start retry logic is duplicated from `RemoteSkill`.
+Smells: `internal static RemoteModuleHelper.GetUaClientFromModule` reads `RemoteModule._client` by reflection (320-326). The `client` parameters are redundant because the base already has a client. `client.Session` is used without a null check (176, 181, 210, 217, 271, 275). The Reset/Start retry logic is duplicated from `RemoteSkill`.
 
 ### 2.9 `RemoteLock` (`Client/RemoteLock.cs`, 318 lines) and `RemoteLockDescriptor` (`Client/RemoteLockDescriptor.cs`, 20 lines)
 **Purpose:** DI `LockingServicesType` access.
@@ -322,16 +320,16 @@ Smells: `Variables` in both classes are case-sensitive `Dictionary`s (`RemoteSto
 | DataChangeNotification | `void DataChangeNotification(...)` | 57-65 |
 | UpdateFromDataValue | `void UpdateFromDataValue(DataValue dv)` | 67-73 |
 | ToDto | `RemoteVariableDto ToDto()` | 75-86 |
-| ReadHistoryAsync | `Task<IList<TimestampedValue>> ReadHistoryAsync(Session, DateTime?, DateTime?, uint)`. A **stub** that always returns an empty list. | 88-93 |
-| WriteValue | `void WriteValue(object value)`. **Sync over async** (`GetAwaiter().GetResult()`). | 95-110 |
+| ReadHistoryAsync | `Task<IList<TimestampedValue>> ReadHistoryAsync(Session, DateTime?, DateTime?, uint)`. A stub that always returns an empty list. | 88-93 |
+| WriteValue | `void WriteValue(object value)`. Sync over async (`GetAwaiter().GetResult()`). | 95-110 |
 | WriteValueAsync | `Task WriteValueAsync(object value)` | 112-118 |
 | TimestampedValue | `object? Value; DateTime? Timestamp` | 121-125 |
 
-Smells: `UaDataType`, `UaValueRank`, `ValidValues`, `Unit`, `Range` and `Children` are **never populated** anywhere. `IsWritable` is set by the folder (true for ParameterSet), not from AccessLevel. `Value` and `Timestamp` are not synchronized. Writes are done as `new Variant(value)` with no DataType coercion (`UaClient.cs:403-408`), so writing an `int` to a `Double` node fails with `BadTypeMismatch`.
+Smells: `UaDataType`, `UaValueRank`, `ValidValues`, `Unit`, `Range` and `Children` are never populated anywhere. `IsWritable` is set by the folder (true for ParameterSet), not from AccessLevel. `Value` and `Timestamp` are not synchronized. Writes are done as `new Variant(value)` with no DataType coercion (`UaClient.cs:403-408`), so writing an `int` to a `Double` node fails with `BadTypeMismatch`.
 
 ### 2.12 `RemoteVariableCollector` (`Client/RemoteVariableCollector.cs`, 152 lines)
-`static Task AddVariableNodesAsync(Session session, NodeId startNode, IDictionary<NodeId, RemoteVariable> nodeMapping, IDictionary<string, RemoteVariable> nameMapping, bool isWritable, int maxNodes = 5000)` (12-150). It runs a **recursive** BFS over HierarchicalReferences, creates a `RemoteVariable` for every Variable node and does an initial read for each (`SemaphoreSlim(20)`, `Task.Run` per variable). It excludes EURange, EngineeringUnits and similar names (65-76).
-Smells: variables are keyed by **DisplayName** (53). When nested variables have the same name, only the first is kept (113-116). Properties of variables (child variables) are flattened into the same map. There is one Read RPC per variable and no batching.
+`static Task AddVariableNodesAsync(Session session, NodeId startNode, IDictionary<NodeId, RemoteVariable> nodeMapping, IDictionary<string, RemoteVariable> nameMapping, bool isWritable, int maxNodes = 5000)` (12-150). It runs a recursive BFS over HierarchicalReferences, creates a `RemoteVariable` for every Variable node and does an initial read for each (`SemaphoreSlim(20)`, `Task.Run` per variable). It excludes EURange, EngineeringUnits and similar names (65-76).
+Smells: variables are keyed by DisplayName (53). When nested variables have the same name, only the first is kept (113-116). Properties of variables (child variables) are flattened into the same map. There is one Read RPC per variable and no batching.
 
 ### 2.13 `SubscriptionManager` and `IDataChangeHandler` (`Client/SubscriptionManager.cs`, 385 lines)
 `interface IDataChangeHandler { void DataChangeNotification(NodeId nodeId, DataValue value, MonitoredItemNotificationEventArgs args); }` (11-14)
@@ -352,19 +350,19 @@ Threading: `ConcurrentDictionary` for `_monitored`, `_handlers` and `_rawHandler
 Bugs:
 - **`SubscribeDataChangeAsync` ignores the notified value.** On every notification it issues a **new `ReadValueAsync` against the `session` captured at subscribe time** and passes that to the handler (153-164). This adds one RPC per change, can reorder values, and reads from a dead session after a session swap (the exception is swallowed, so the update is lost silently).
 - **There is no de-duplication.** Every `SubscribeCoreAsync`/`SetupSubscriptionsAsync` pass adds new monitored items for the same nodes, and those passes run at connect, after reconnect, and lazily per skill.
-- `RebindSubscriptionsAsync` recreates **event** items as plain value items without a handler (`AttributeId` is captured but `AddMonitoredItemAsync` always uses `Attributes.Value`; event items have no `_rawHandlers` entry, 357-369), so event monitoring is lost after a reconnect.
+- `RebindSubscriptionsAsync` recreates event items as plain value items without a handler (`AttributeId` is captured but `AddMonitoredItemAsync` always uses `Attributes.Value`; event items have no `_rawHandlers` entry, 357-369), so event monitoring is lost after a reconnect.
 - `AddEventMonitoredItemAsync` uses `ApplyChangesAsync` without retry and stores no handler for rebind (130-135). `_lastReconnectAttempt` and `_reconnectCooldown` are unused (20-21).
 
 ### 2.14 `SessionBrowseCache` (`Client/SessionBrowseCache.cs`, 185 lines)
 `static bool TryGet(Session, NodeId start, string[] path, out NodeId? nodeId)` (27-37); `static void Store(Session, NodeId, string[], NodeId)` (39-43); `static Task<NodeId?> TranslatePathAsync(Session session, NodeId start, string[] path)` (50-183).
 Static, unbounded `ConcurrentDictionary<string,string>` keyed by `sessionId|start|path` (18), with no eviction.
-**Likely ineffective:** the path elements are built with `new QualifiedName(p)` and therefore **namespace index 0** (66, 133). TranslateBrowsePaths compares namespace-qualified names, so paths through vendor or companion-spec nodes (SkillSet, SkillExecution, StateMachine, Start/Reset/Halt in the skill namespace) will not resolve, and every caller falls back to a slow BFS. Only ns0 names such as `CurrentState` can hit. This is inferred from the code and should be verified against a live server. The SDK response is unpacked through reflection (86-103, 147-164).
+**Likely ineffective:** the path elements are built with `new QualifiedName(p)` and therefore namespace index 0 (66, 133). TranslateBrowsePaths compares namespace-qualified names, so paths through vendor or companion-spec nodes (SkillSet, SkillExecution, StateMachine, Start/Reset/Halt in the skill namespace) will not resolve, and every caller falls back to a slow BFS. Only ns0 names such as `CurrentState` can hit. This is inferred from the code and should be verified against a live server. The SDK response is unpacked through reflection (86-103, 147-164).
 
 ### 2.15 `UaHelpers` (`Client/UaHelpers.cs`, 66 lines)
 `static NodeId ToNodeId(ExpandedNodeId expanded, Session session)` (9-64). It **throws `NotSupportedException` for absolute ExpandedNodeIds** (63). Callers mostly wrap it in `catch {}`, so remote-server references are silently dropped.
 
 ### 2.16 `LockTest` (`Client/LockTest.cs`, 75 lines)
-`static Task<int> Run(string url, string username, string password, string moduleName = "CA-Module")` (10-73). This is a console demo that lives **inside the library** and writes to `Console`.
+`static Task<int> Run(string url, string username, string password, string moduleName = "CA-Module")` (10-73). This is a console demo that lives inside the library and writes to `Console`.
 
 ### 2.17 `Common/*` (93 lines)
 - `Enums.cs` (17 lines): `enum SkillStates { Halted=11, Ready=12, Running=13, Suspended=14, Completed=15, Starting=16, Halting=17, Completing=18, Resetting=19, Suspending=20 }` (4-16). The comment says "translation of relevant enums from Python" (3).
@@ -376,11 +374,9 @@ Static, unbounded `ConcurrentDictionary<string,string>` keyed by `sessionId|star
 - `UAClient/Program.cs` is a `static async Task<int> Main(string[] args)` **inside the library assembly** (34). Its modes are `--skilltest`, `--locktest`, `--autoready` and the default `isinstorage` (60-73, 151-155). It contains hard-coded defaults `opc.tcp://localhost:4842` and **`orchestrator`/`orchestrator`** credentials (58, 71-85), the module name `"CA-Module"` (162), and `Components["Robot"].SkillSet["MoveToJointPosition"]` (267-268). It sets global `TaskScheduler.UnobservedTaskException` and `AppDomain.UnhandledException` handlers (37-54) that would affect any host that loads it.
 - `RemoteInspector`: a console app that dumps a module's ports, neighbors, storages/slots, components and skills from `config.json` (18-210). It is not in `cs_client.slnx`.
 
----
-
 ## 3. Classification: (G) generic, maps onto OpenSMI concepts, vs. (S) SmartFactory/IMAPRO-specific
 
-OpenSMI concept columns: **Srv** = server/connection, **Mach** = machine/module, **Comp** = component, **Skill**, **Meth** = method, **Var** = variable, **Lock**, **Sub** = subscription. "G*" means the feature is generic but the current implementation relies on SmartFactory heuristics and should be reimplemented rather than ported.
+OpenSMI concept columns: Srv = server/connection, Mach = machine/module, Comp = component, Skill, Meth = method, Var = variable, Lock, Sub = subscription. "G*" means the feature is generic but the current implementation relies on SmartFactory heuristics and should be reimplemented rather than ported.
 
 ### 3.1 Connection / server
 | Feature | Class | OpenSMI | Location |
@@ -392,7 +388,7 @@ OpenSMI concept columns: **Srv** = server/connection, **Mach** = machine/module,
 | Status enum and subscriber events | G | Srv | `RemoteServer.cs:12-26, 59-71` |
 | SDK reconnect handler and KeepAlive | G | Srv | `RemoteServer.cs:470-580`, `UaClient.cs:28-114` |
 | Polling AutoReconnectLoop (second mechanism) | G* (drop; keep one) | Srv | `RemoteServer.cs:333-422` |
-| Post-reconnect: re-discover plus **auto-recovery of modules** | S (recovery semantics) | Mach | `RemoteServer.cs:391-403, 445-457` |
+| Post-reconnect: re-discover plus auto-recovery of modules | S (recovery semantics) | Mach | `RemoteServer.cs:391-403, 445-457` |
 | Server time subscription (i=2258) | G (currently a no-op) | Sub | `RemoteServer.cs:108-116` |
 
 ### 3.2 Discovery
@@ -427,7 +423,7 @@ OpenSMI concept columns: **Srv** = server/connection, **Mach** = machine/module,
 | Monitoring read | G | Skill/Var | `RemoteSkill.cs:852-878` |
 | FinalResultData snapshot / read | G | Skill/Var | `RemoteSkill.cs:1221-1312` |
 | `SuccessfulExecutionsCount` extraction / wait | G* (a FinalResultData naming convention; OpenSMI-like but SF-originated) | Skill | `RemoteSkill.cs:1210-1216, 1393-1403` |
-| `ExecuteAsync` orchestration (reset-before, start, wait, reset-after, BadInvalidState recovery) | G (orchestration policy; IMAPRO did **not** use it) | Skill | `RemoteSkill.cs:969-1208, 1314-1362` |
+| `ExecuteAsync` orchestration (reset-before, start, wait, reset-after, BadInvalidState recovery) | G (orchestration policy; IMAPRO did not use it) | Skill | `RemoteSkill.cs:969-1208, 1314-1362` |
 | `IsFinite` heuristic | G* | Skill | `RemoteSkill.cs:339-360` |
 
 ### 3.4 Methods / variables / subscriptions
@@ -464,8 +460,6 @@ OpenSMI concept columns: **Srv** = server/connection, **Mach** = machine/module,
 | `Program.cs` scenarios (`CA-Module`, `Robot`, `MoveToJointPosition`), `LockTest`, `RemoteInspector` | `Program.cs`, `LockTest.cs`, `Tools/RemoteInspector/Program.cs` |
 | `Exceptions.cs` pyuaadapter names | `Exceptions.cs:5-17` (neutral but unused) |
 
----
-
 ## 4. Information-model assumptions
 
 **Namespace URIs** (`Common/NamespaceUris.cs:5-16`): DI `http://opcfoundation.org/UA/DI/`, RSL `.../RSL/`, Machinery `.../Machinery/`, SkillSet `http://smartfactory.de/UA/SkillSet`, MachineSet `http://smartfactory.de/UA/MachineSet`, Robotics, IA, MachineTool, LaserSystems, ECM, ECM-SFKL `http://smartfactory.de/UA/EnergyConsumptionManagement`, SFM v3 `http://smartfactory.de/UA/SFM/`. Only Machinery and SFM v3 are used (`RemoteServer.cs:149,153`). **Everything else matches on unqualified names, ignoring namespaces**: DisplayName or BrowseName `.Name`, often by substring, case-insensitive.
@@ -475,7 +469,7 @@ OpenSMI concept columns: **Srv** = server/connection, **Mach** = machine/module,
 2. `SFM:ModuleSet` (153), else
 3. the first child whose DisplayName contains "Module" or "Machine" (162-168).
 
-The children of that folder (default browse) are module candidates. A candidate is kept iff its TypeDefinition BrowseName contains `"Machine"` (196-230). The module key is the **DisplayName** (189, 234).
+The children of that folder (default browse) are module candidates. A candidate is kept iff its TypeDefinition BrowseName contains `"Machine"` (196-230). The module key is the DisplayName (189, 234).
 
 **Module children** (`RemoteModule.DiscoverMethodsAsync`, one level, 720-1018), in decision order:
 1. TypeDef contains `MonitoringType` or BrowseName = `Monitoring`: variables go to `Monitoring` (763-773).
@@ -486,7 +480,7 @@ The children of that folder (default browse) are module candidates. A candidate 
 6. The type factory (967-1001): a `LockingServicesType` subtype gives `RemoteLock` (460). `PortType` gives `RemotePort` (528). `StorageType` gives `RemoteStorage` (571). The Machinery/IA set gives `RemoteComponent` (422-450, 696). `FiniteSkillType|ContinuousSkillType` gives `RemoteSkill` (451-455, 702).
 7. Otherwise a Method node becomes a `RemoteMethod` (1006-1009).
 
-Type matching compares the **BrowseName.Name** of the TypeDefinition and its supertypes (`IsTypeOrSubtypeOfAsync`, 1714-1751), ignoring namespaces.
+Type matching compares the BrowseName.Name of the TypeDefinition and its supertypes (`IsTypeOrSubtypeOfAsync`, 1714-1751), ignoring namespaces.
 
 **Component children** (`RemoteComponent.SetupSubscriptionsAsync`, 179-363): `SkillSet` (children whose BrowseName ends in `Type` or contains `SkillExecution` are skipped, 197), `Monitoring`, `ParameterSet`, `Attributes` or `Identification`, `Components` (HasComponent plus Organizes, 246-308), `Notification/Messages` (event notifier, 309-338) and `MethodSet` (339-363).
 
@@ -498,15 +492,13 @@ Type matching compares the **BrowseName.Name** of the TypeDefinition and its sup
 
 **Startup and coupling conventions**: the startup skill is the first `RemoteSkill` in module `Methods` whose name contains `Startup` (`RemoteModule.cs:1580-1582`). The couple skill is named exactly `CoupleSkill`: port SkillSet, then port Methods, then module Methods (`RemotePort.cs:74, 86, 115-139`). Coupled = CoupleSkill Running, else PartnerRfidTag is non-empty (`RemotePort.cs:68-106`).
 
-**Lock**: TypeDefinition `LockingServicesType` or a subtype (`RemoteModule.cs:460`). Methods are matched by substring: `InitLock`, `BreakLock`, `ExitLock`, `RenewLock` (491-494). `InitLockAsync` candidates, in order: `InitLock, RenewLock, ExitLock, AcquireLock, EnterLock, RequestLock, Lock, Init` (`RemoteLock.cs:152`). Release candidates: `ReleaseLock, ExitLock, Unlock, Release, LeaveLock` (`RemoteLock.cs:180`). The methods are called with **no inputs** on the lock object (`RemoteLock.cs:164, 191`). Variables are matched by substring: `Locked`, `LockingUser`, `LockingClient`, `RemainingLockTime`, and `CurrentState` **or any name containing "State"** (`RemoteModule.cs:512-516`). `Locked` must be a Boolean, otherwise an exception is thrown (`RemoteLock.cs:76-77, 93-94`). The owner is LockingClient, then LockingUser (`RemoteLock.cs:114-138`).
+**Lock**: TypeDefinition `LockingServicesType` or a subtype (`RemoteModule.cs:460`). Methods are matched by substring: `InitLock`, `BreakLock`, `ExitLock`, `RenewLock` (491-494). `InitLockAsync` candidates, in order: `InitLock, RenewLock, ExitLock, AcquireLock, EnterLock, RequestLock, Lock, Init` (`RemoteLock.cs:152`). Release candidates: `ReleaseLock, ExitLock, Unlock, Release, LeaveLock` (`RemoteLock.cs:180`). The methods are called with no inputs on the lock object (`RemoteLock.cs:164, 191`). Variables are matched by substring: `Locked`, `LockingUser`, `LockingClient`, `RemainingLockTime`, and `CurrentState` **or any name containing "State"** (`RemoteModule.cs:512-516`). `Locked` must be a Boolean, otherwise an exception is thrown (`RemoteLock.cs:76-77, 93-94`). The owner is LockingClient, then LockingUser (`RemoteLock.cs:114-138`).
 
 **Ports**: TypeDefinition `PortType` (`RemoteModule.cs:528`). Attributes `IsActive` and `OwnRfidTag`; Monitoring `PartnerRfidTag` and `MagnetsClosed` (`RemotePort.cs:34-61`). The neighbor ID is the segment between the last two underscores before `Gate` in PartnerRfidTag (`RemoteModule.cs:89-100`).
 
 **Storage**: TypeDefinition `StorageType` (`RemoteModule.cs:571`). A slot is identified by BrowseName containing `StorageSlot` or by `StorageSlotType`, either directly or under `Components` (597-608, 630-688). Slot variables are listed in §3.6. Resource resolution of `CarrierType`/`ProductType` values parses a NodeId string or a dotted browse path from slot, storage, module or Objects (`RemoteModule.cs:1130-1154`).
 
 **Other fixed IDs**: ServerStatus.CurrentTime is `i=2258` (`RemoteServer.cs:110`). `SuccessfulExecutionsCount` is found by key substring in FinalResultData (`RemoteSkill.cs:1399`).
-
----
 
 ## 5. Tests (`UAClient.Tests`, xUnit, `DisableTestParallelization=true` in `AssemblyInfo.cs:3`)
 
@@ -518,7 +510,7 @@ Type matching compares the **BrowseName.Name** of the TypeDefinition and its sup
 | `RemoteVariableTests.cs` (30) | `UpdateFromDataValue` sets value and timestamp; `WriteValue` without a client throws (9-28) | No |
 | `SubscriptionManagerTests.cs` (33) | `AddMonitoredItemAsync`/`SubscribeDataChangeAsync` throw without a session (12-26) | No |
 | `UaClientTests.cs` (24) | ctor; `ReadNodeAsync` without a session throws (10-22) | No |
-| `IntegrationTests.cs` (101) | Connect and discover (asserts `Modules.Count >= 0`, a tautology, line 46); lock and start the `CA-Module` startup skill (54-99). **Line 81 bug**: `GetEnumerator().Current` without `MoveNext()` is always null and throws. | Yes, gated by `RUN_INTEGRATION_TESTS=1`, otherwise passes vacuously |
+| `IntegrationTests.cs` (101) | Connect and discover (asserts `Modules.Count >= 0`, a tautology, line 46); lock and start the `CA-Module` startup skill (54-99). Line 81 bug: `GetEnumerator().Current` without `MoveNext()` is always null and throws. | Yes, gated by `RUN_INTEGRATION_TESTS=1`, otherwise passes vacuously |
 | `FullIntegrationTests.cs` (249) | `Module_FullLifecycle_EndToEnd`: ports > 0, skill present, lock true, couple, `Robot.MoveToJointPosition` execute with random joint angles, FinalResultData (25-153). `Skills_ShouldExpose_State_Finals_Monitoring_Parameters_And_TypeHints`: state is in the enum, Startup and Couple are continuous, Move is finite (155-247). | Yes (same gate) |
 | `ModuleLifecycleTests.cs` (161) | `MakeReadyAsync` gives `IsReady` (24-62); `IsInStorageAsync` finds a known ProductID (64-159) | Yes (same gate) |
 | `StoreSkillFinalResultTests.cs` (442) | Lock, couple, start Startup, run a "Store"-named skill twice, and check that `SuccessfulExecutionsCount` increases by >= 2 (96-440) | Yes (same gate) |
@@ -527,12 +519,10 @@ Live config for every integration test: env `UA_TEST_SERVER` (default **`opc.tcp
 
 Coverage gap: nothing tests discovery, skill state handling, ExecuteAsync, locking or subscriptions without hardware. There are no mocks or fakes of `ISession`. The committed TRX files (2025-11-30) contain one test each, and the message uses MSTest's `Assert.AreEqual` text, so the tests were migrated from MSTest at some point.
 
----
-
 ## 6. Repo hygiene
 
-1. **Build output is committed**: **190** tracked files under `bin/` or `obj/` (`UAClient/bin`, `UAClient/obj`, `UAClient.Tests/bin` with 98 files including localized TestPlatform resource DLLs, `UAClient.Tests/obj`, and `Tools/RemoteInspector/bin|obj` including `RemoteInspector.exe`). There is **no `.gitignore`**.
-2. **IDE state is committed**: 13 files under `UAClient.Tests/.vs/`, including `.suo`, `DocumentLayout*.json`, `TestStore/*.testlog`, `.dtbcache.v2` and **Copilot indices** `CopilotIndices/18.3.180.61135/CodeChunks.db` and `SemanticSymbols.db`.
+1. **Build output is committed**: 190 tracked files under `bin/` or `obj/` (`UAClient/bin`, `UAClient/obj`, `UAClient.Tests/bin` with 98 files including localized TestPlatform resource DLLs, `UAClient.Tests/obj`, and `Tools/RemoteInspector/bin|obj` including `RemoteInspector.exe`). There is **no `.gitignore`**.
+2. **IDE state is committed**: 13 files under `UAClient.Tests/.vs/`, including `.suo`, `DocumentLayout*.json`, `TestStore/*.testlog`, `.dtbcache.v2` and Copilot indices `CopilotIndices/18.3.180.61135/CodeChunks.db` and `SemanticSymbols.db`.
 3. **Test results are committed**: `UAClient.Tests/TestResults/BenjaminBlumhofer_DESKTOP-73VA9N6_2025-11-30_09_43_{38,58}.trx`. They leak the user and host name.
 4. **Credentials and an internal IP are committed**: `Tools/RemoteInspector/config.json` (`opc.tcp://192.168.178.30:4892`, `visitor`/`visitor`). There are hard-coded defaults `orchestrator`/`orchestrator` and `172.24.100.85:4892` in `Program.cs:71-85` and all integration tests.
 5. **Demo code is in the library**: `UAClient/Program.cs` (a `Main` in an `OutputType=Library` project, plus global exception handlers) and `Client/LockTest.cs`. `Client/RemoteLock.PrintVariablesAsync` writes to `Console`. The logger is console-only (`Common/Log.cs`).
@@ -543,8 +533,6 @@ Coverage gap: nothing tests discovery, skill state handling, ExecuteAsync, locki
 10. **Pinned versions are not resolvable from a cache-only feed**: test SDK 18.0.1 and xunit 2.8.1 / runner 2.8.0 (NU1100 / NU1603 in §1).
 11. **Code-health signals**: 54 compiler warnings, including obsolete sync SDK calls; unused fields and parameters (`maxRetries`, `_firstConnection`, `_autoReady*`, `AllowLockFallback`, `_start/_reset/_haltMethodNode`); two 1.5k-2.1k-line god classes; and hundreds of empty `catch {}` blocks.
 12. The history in this clone is shallow (only `e57b3c0` is visible). The real history is on GitHub.
-
----
 
 ## 7. How IMAPRO used SSC (for API-compatibility decisions)
 
@@ -557,13 +545,13 @@ Member usage at `fc21f7a^` (count of matching lines in those files):
 | Type | Members used | Examples (IMAPRO path:line at `fc21f7a^`) |
 |---|---|---|
 | `UaClient` | `new UaClient(endpoint, user, pass)` (1), `.Session` (11; `Session.Connected`) | `Nodes/Configuration/ConnectToModuleNode.cs:77, 93-102` |
-| `RemoteServer` | `new RemoteServer(client)`, `ConnectAsync(timeoutSeconds)` (2), `Modules` (**42**), `Status` + `RemoteServerStatus.Connected`, `SubscriptionManager`, `AddSubscriber` | `ConnectToModuleNode.cs:36, 49, 80, 84`; `Services/StorageMqttNotifier.cs:62` |
+| `RemoteServer` | `new RemoteServer(client)`, `ConnectAsync(timeoutSeconds)` (2), `Modules` (42), `Status` + `RemoteServerStatus.Connected`, `SubscriptionManager`, `AddSubscriber` | `ConnectToModuleNode.cs:36, 49, 80, 84`; `Services/StorageMqttNotifier.cs:62` |
 | `IRemoteServerSubscriber` | implemented: `OnConnectionLost`, `OnStatusChange(RemoteServerStatus)` (plus the rest of the interface) | `Services/RemoteServerMqttNotifier.cs:13, 37` |
 | `SubscriptionManager` | `AddMonitoredItemAsync(nodeId, handler)` (raw handler; comment notes it "does not update RemoteVariable.Value automatically") | `Services/StorageMqttNotifier.cs:182-190` |
-| `RemoteModule` | `Name`, `SkillSet` (**36**: `.Count`, `.Values`, `.TryGetValue`, `.Keys`), `Methods` (2), `Ports` (1), `Storages` (15), `Lock` (3), `LockAsync(session)` (4), `IsLockedByUs` (11), `EnableAutoRecoveryAsync()` (1), `GetNeighborIds()` (1) | `Nodes/Locking/LockResourceNode.cs:88`, `Nodes/Recovery/EnsureModuleLockedNode.cs:49-87`, `ConnectToModuleNode.cs:120`, `Nodes/ModuleHolon/ReadNeighborsFromRemoteNode.cs:43` |
+| `RemoteModule` | `Name`, `SkillSet` (36: `.Count`, `.Values`, `.TryGetValue`, `.Keys`), `Methods` (2), `Ports` (1), `Storages` (15), `Lock` (3), `LockAsync(session)` (4), `IsLockedByUs` (11), `EnableAutoRecoveryAsync()` (1), `GetNeighborIds()` (1) | `Nodes/Locking/LockResourceNode.cs:88`, `Nodes/Recovery/EnsureModuleLockedNode.cs:49-87`, `ConnectToModuleNode.cs:120`, `Nodes/ModuleHolon/ReadNeighborsFromRemoteNode.cs:43` |
 | `RemoteLock` | `GetLockOwnerAsync(session)` | `LockResourceNode.cs:146-149` |
 | `RemotePort` | `IsCoupledAsync(client)`, `CoupleAsync(client, timeout)`, `SkillSet.Keys`, `Methods.Values.OfType<RemoteSkill>()`, `Module.Methods`, `Module.SkillSet` | `Nodes/Configuration/EnsurePortsCoupledNode.cs:59-154` |
-| `RemoteSkill` | `Name` (86 `.Name` hits overall), `CurrentState` (**31**, cached `SkillStates`), `GetStateAsync()` (9), `StartAsync()` (2), `HaltAsync()` (1), `ResetAsync()` (5), `WaitForStateAsync(state, timeout)` (4), `SetInputParametersAsync(dict)` (1), `IsFinite` (2), `GetSuccessfulExecutionsCountAsync()` (1), `ReadFinalResultDataAsync(window, expectedCount)` (2), `ReadFinalResultDataSnapshotAsync()` (2) | `Nodes/SkillControl/ExecuteSkillNode.cs:176-578`, `Nodes/Recovery/EnsureStartupRunningNode.cs:48-115`, `Nodes/Recovery/HaltAllSkillsNode.cs:40-96` |
+| `RemoteSkill` | `Name` (86 `.Name` hits overall), `CurrentState` (31, cached `SkillStates`), `GetStateAsync()` (9), `StartAsync()` (2), `HaltAsync()` (1), `ResetAsync()` (5), `WaitForStateAsync(state, timeout)` (4), `SetInputParametersAsync(dict)` (1), `IsFinite` (2), `GetSuccessfulExecutionsCountAsync()` (1), `ReadFinalResultDataAsync(window, expectedCount)` (2), `ReadFinalResultDataSnapshotAsync()` (2) | `Nodes/SkillControl/ExecuteSkillNode.cs:176-578`, `Nodes/Recovery/EnsureStartupRunningNode.cs:48-115`, `Nodes/Recovery/HaltAllSkillsNode.cs:40-96` |
 | `RemoteStorage` / `RemoteStorageSlot` | `Slots` (21), `Variables` (`TryGetValue("IsSlotEmpty"/"CarrierID"/"ProductID"/"ProductType"/"CarrierType")`), `IsInStorageAsync(...)`, `CarrierId`, `ProductId` (26), `IsSlotEmpty` (7), `CarrierTypeDisplay()`, `ProductTypeDisplay()` | `Nodes/Monitoring/ReadStorageNode.cs:94-106`, `Services/SkillPreconditionChecker.cs:255`, `Services/StorageMqttNotifier.cs:423-434` |
 | `RemoteVariable` | `Value`, `NodeId`, `UpdateFromDataValue(dv)` | `StorageMqttNotifier.cs:425, 434` |
 | `UAClient.Common.SkillStates` | 40 references (Halted/Ready/Running/Completed checks) | throughout `Nodes/**` |
