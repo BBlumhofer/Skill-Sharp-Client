@@ -110,3 +110,13 @@ Python-Client `opensmi-client @ e8740c2`. Abnahme: SPEC §12
   ([03](issues/03-offene-entscheidungen-spec11.md)).
 - Server-Implementierung, Port von `opensmi-core` jenseits des Client-Bedarfs (SPEC §1).
 - API-Kompatibilität zum alten `SkillSharp.Client` (kein Konsument mehr, SPEC §1).
+
+## Offene Punkte auf GitHub (ab 2026-10-30)
+
+Was nach dem PR [#2](https://github.com/BBlumhofer/Skill-Sharp-Client/pull/2) offen ist, wird als
+GitHub-Issue weitergeführt, nicht mehr hier:
+[#3 LICENSE/NOTICE](https://github.com/BBlumhofer/Skill-Sharp-Client/issues/3), [#4 leeres catch](https://github.com/BBlumhofer/Skill-Sharp-Client/issues/4), [#5 Lock-Bug in opensmi-server](https://github.com/BBlumhofer/Skill-Sharp-Client/issues/5),
+[#6 Tag und legacy/ löschen (Ticket 33)](https://github.com/BBlumhofer/Skill-Sharp-Client/issues/6), [#7 Item-Retry](https://github.com/BBlumhofer/Skill-Sharp-Client/issues/7), [#8 SmartFactory-Paket](https://github.com/BBlumhofer/Skill-Sharp-Client/issues/8),
+[#9 Release/NuGet/Umbenennung](https://github.com/BBlumhofer/Skill-Sharp-Client/issues/9), [#10 CI-Actions](https://github.com/BBlumhofer/Skill-Sharp-Client/issues/10), [#11 Test NodeId-Schreiben](https://github.com/BBlumhofer/Skill-Sharp-Client/issues/11),
+[#12 Completing nach Completed](https://github.com/BBlumhofer/Skill-Sharp-Client/issues/12).
+
