@@ -17,6 +17,7 @@ public class ExamplesTests(ExamplesServer fixture) : IClassFixture<ExamplesServe
     /// <summary>Captures stdout; safe because test parallelization is disabled (ServerFixture.cs).</summary>
     internal static async Task<string> OutputOfAsync(Func<Task> example)
     {
+        await ServerFixture.WaitForClosedSessionsAsync();
         var original = Console.Out;
         var output = new StringWriter();
         Console.SetOut(output);
@@ -43,6 +44,7 @@ public class ExamplesTests(ExamplesServer fixture) : IClassFixture<ExamplesServe
     [Fact]
     public async Task Quick_start_runs_a_skill()
     {
+        await ServerFixture.WaitForClosedSessionsAsync();
         await ColdStartExample.RunAsync(Url); // DummySkill needs the StartupSkill running
         var output = await OutputOfAsync(() => QuickStartExample.RunAsync(Url, "DummyMachine", "DummySkill"));
         Assert.Contains("results:", output);
@@ -105,6 +107,7 @@ public class ExamplesTests(ExamplesServer fixture) : IClassFixture<ExamplesServe
     public async Task Subscription_component_runs_for_the_duration()
     {
         // The dummy machine only notifies while skills run, so this checks that it connects and stops cleanly after the duration.
+        await ServerFixture.WaitForClosedSessionsAsync();
         await SubscriptionComponentExample.RunAsync(Url, TimeSpan.FromSeconds(2));
     }
 }

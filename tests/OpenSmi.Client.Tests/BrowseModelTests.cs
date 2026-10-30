@@ -90,6 +90,9 @@ public class BrowseModelTests
         var machine = server.Machines["DummyMachine"];
         var state = await machine.ReadCurrentStateAsync();
         Assert.NotEqual("Unknown", state);
+        // The cache is filled by the subscription's first notification, which may arrive after ConnectAsync.
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (machine.CurrentState != state && DateTime.UtcNow < deadline) await Task.Delay(50);
         Assert.Equal(state, machine.CurrentState);
     }
 }

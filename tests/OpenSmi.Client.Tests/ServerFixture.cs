@@ -25,8 +25,18 @@ public sealed class ServerFixture : IAsyncLifetime
     public static RemoteServerOptions Options(string user = "orchestrator", IReadOnlyList<BrowseRule>? rules = null) =>
         new() { Url = Url, Username = user, Password = user, BrowseRules = rules };
 
-    public static async Task<RemoteServer> ConnectAsync(string user = "orchestrator", IReadOnlyList<BrowseRule>? rules = null) =>
-        await new RemoteServer(Options(user, rules)).ConnectAsync();
+    public static async Task<RemoteServer> ConnectAsync(string user = "orchestrator", IReadOnlyList<BrowseRule>? rules = null)
+    {
+        await WaitForClosedSessionsAsync();
+        return await new RemoteServer(Options(user, rules)).ConnectAsync();
+    }
+
+    /// <summary>
+    /// opensmi-server notices closed sessions only in a 1 s loop and then releases the lock of that session's
+    /// *user*, even one the same user has taken again meanwhile (access_control._check_for_closed_sessions_loop,
+    /// lock._on_session_closed). Waiting before each connect keeps the previous test's session out of the next one.
+    /// </summary>
+    public static Task WaitForClosedSessionsAsync() => Task.Delay(TimeSpan.FromSeconds(1.5));
 }
 
 [CollectionDefinition("server")]
