@@ -94,6 +94,10 @@ Python-Client `opensmi-client @ e8740c2`. Abnahme: SPEC §12
 - [26 Unit-Enum](issues/26-unit-enum.md): 2133 Einheiten generiert aus opensmi-core
   (`tools/generate_units.py`), Python-Namen (`CENTIMETRE`), Helfer in `Units`, Abbildung per `eu.ToUnit()`.
 
+- [34 Version 2.0.0](issues/34-version-2-upstream-9026539.md): Upstream 9026539 / opensmi-server 0.3.1
+  portiert (Pfade, Samples, User am Server, DTOs entfernt), Tests gegen alle Server-Beispiele, `legacy/`
+  gelöscht, Version 2.0.0. Requirements unter dem Skill-Objekt bleiben wie in Python leer (offen).
+
 ## Not yet specified
 
 - Abgleich gegen die Beispielserver von opensmi-server (2026-10-29): `quick_start` (19 Objekte) und
@@ -102,7 +106,8 @@ Python-Client `opensmi-client @ e8740c2`. Abnahme: SPEC §12
   Python und C# liefern dieselben 19 Objekte.
 - Retry einzelner fehlgeschlagener Monitored Items (SPEC §7.1): bisher kein realistischer Auslöser
   gegen den Dummy-Server; erst ticketfähig, wenn ein echter Server das Problem zeigt.
-- Release 0.1.0, NuGet und Repo-Umbenennung: warten auf die Frage, ob SmartFactory-KL den Client aufnimmt.
+- NuGet-Veröffentlichung von 2.0.0 und Repo-Umbenennung: warten auf die Frage, ob SmartFactory-KL den Client aufnimmt.
+- Tag `skillsharp-legacy-final` auf `e57b3c0` (Ticket 33) setzen.
 
 ## Out of scope
 

@@ -54,10 +54,21 @@ public sealed partial class TestServer : IAsyncDisposable
     {
         var dir = Directory.CreateTempSubdirectory("opensmi-server-").FullName;
         var path = Path.Combine(AppContext.BaseDirectory, "servers", script);
-        var server = new TestServer(port, dir, string.Join(' ', [$"\"{path}\"", port.ToString(), .. arguments]), "127.0.0.1");
+        var server = new TestServer(port, dir,
+            string.Join(' ', [$"\"{path}\"", port.ToString(), .. arguments.Select(a => $"\"{a}\"")]), "127.0.0.1");
         await server.StartAgainAsync();
         return server;
     }
+
+    /// <summary>
+    /// Starts an opensmi-server example (<c>opensmi-server/examples/&lt;name&gt;/main.py</c>) unchanged on
+    /// <paramref name="port"/> through <c>servers/run_example.py</c>.
+    /// </summary>
+    public static Task<TestServer> StartExampleAsync(string name, int port) =>
+        StartScriptAsync("run_example.py", port: port, ExampleMain(name));
+
+    internal static string ExampleMain(string name) =>
+        System.IO.Path.GetFullPath(System.IO.Path.Combine(SourceDir(), "..", name, "main.py"));
 
     private static void AddCustomTypes(string dir)
     {

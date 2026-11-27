@@ -2,7 +2,7 @@ namespace OpenSmi.Client.Examples;
 
 /// <summary>
 /// Port of examples/quick_start.py: lock the machine and run a skill once. The defaults fit the
-/// opensmi-server quick_start example (opc.tcp://localhost:4841/).
+/// opensmi-server quick_start example (opc.tcp://localhost:4841/server).
 /// </summary>
 public static class QuickStartExample
 {

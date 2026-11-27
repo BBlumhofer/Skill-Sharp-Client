@@ -1,5 +1,14 @@
 # Spezifikation: OpenSMI-Client für C# (`OpenSmi.Client`)
 
+> **Version 2.0.0 (2026-11-27):** Der Client folgt jetzt `opensmi-client @ 9026539` (opensmi-core 0.7.1,
+> opensmi-server 0.3.1). Gegenüber dem Stand unten gilt: Pfade sind `ObjectPath` mit OpenSMI-Ordnern
+> (`/M1/Components/Gripper/SkillSet/Pick`), eindeutigen Segmenten, Aliasen und `Resolve`/`Find`; Checks heißen
+> `RemoteSkillCheck` und liegen unter ihrem Skill; User gehören dem Server (`/Users/<name>`); Werte und Zustände sind
+> `Sample<T>` mit Status und Zeitstempeln; der Komponentenzustand ist `MachineryItemState`; DTOs sind entfallen;
+> Notifications werden nach Monitored Item zugeordnet und lesen `ErrorCode` aus dem AlertType. Der alte
+> `SkillSharp.Client` (1.x) ist mit 2.0.0 vollständig ersetzt und aus dem Repo entfernt. Die Abweichungen in §10
+> gelten in der Fassung von [DEVIATIONS.md](DEVIATIONS.md).
+
 Stand: 2026-10-29. Referenz-Snapshots: `SmartFactory-KL/opensmi-client` @ `e8740c2` (2026-10-23),
 `opensmi-core` @ `68ef623`, `opensmi-server` @ `29e4d4a`, `Skill-Sharp-Client` @ `e57b3c0` (2026-02-13).
 Die Detail-Inventare mit `file:line`-Belegen liegen in [`analyse/`](analyse/). Diese Spec verweist
@@ -457,13 +466,13 @@ auf dem Kern, nicht als Fork:
 | `start(wait=True)` wartet nur auf Running/Completed | `StartWait.Completion` zusätzlich | README verspricht Abschluss [OI §5] |
 | Waits ohne Timeout | `timeout` + `CancellationToken` | Hängen vermeiden |
 | `ua_value_rank` immer 0 | korrekt gelesen | Bug [OI §2.10] |
-| `RemoteUserDTO.current_access_level` = Lock-Priorität | `LockPriority` | Benennungsfehler [OI §2.14] |
-| `RemoteMachine.dto()` → `AssertionError` ohne Lock | `Lock = null` im DTO | Bug [OI §2.5] |
-| `read_current_state` → `KeyError` | `OpenSmiProtocolException` | robustere Fehlerklasse |
+| `user_level` = Lock-Priorität als Text | zusätzlich `LockPriority` | Benennungsfehler [OI §2.14] |
+| `read_current_state` → `KeyError` / `UnknownStateError` | `OpenSmiUnknownStateException` | robustere Fehlerklasse |
+| Zustände bis zur ersten Notification unbekannt | beim Browsen gelesen | nach `ConnectAsync` verlässlich |
+| `read_all` nach Name, `write_all` nach Segment | beide nach Segment | gleiche Schlüssel |
 | Lock-Rückgabewerte ignoriert | `LockResult` | Information nicht verwerfen [OI §6] |
 | Zertifikat pro Connect neu, kein Trust-Store | persistentes Zertifikat, Trust-Store | Sicherheit [OI §7] |
 | `read_all`/`write_all` sequenziell | gebatcht | Performance |
-| `feasibility/precondition_check_set` nicht im DTO | im DTO enthalten | Vollständigkeit |
 
 Jede Abweichung braucht einen Test und einen Eintrag in `docs/opensmi/DEVIATIONS.md`. Wenn
 upstream den Fehler behebt, wird das Verhalten angeglichen.

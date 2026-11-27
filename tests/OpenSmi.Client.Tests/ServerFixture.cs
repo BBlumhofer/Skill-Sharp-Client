@@ -43,14 +43,16 @@ public sealed class ServerFixture : IAsyncLifetime
 [CollectionDefinition("server")]
 public sealed class ServerCollection : ICollectionFixture<ServerFixture>;
 
-/// <summary>Runs <see cref="ServerFixture.SettleAsync"/> after every test against a dummy server.</summary>
+/// <summary>Runs <see cref="ServerFixture.SettleAsync"/> after every test of a class with a server (collection or class fixture).</summary>
 [AttributeUsage(AttributeTargets.Assembly)]
 public sealed class SettleSessionsAttribute : BeforeAfterTestAttribute
 {
     public override void After(MethodInfo methodUnderTest)
     {
         var type = methodUnderTest.DeclaringType;
-        if (type?.GetCustomAttribute<CollectionAttribute>() != null || type?.Name == "ExamplesTests")
+        var usesServer = type?.GetCustomAttribute<CollectionAttribute>() != null
+            || type?.GetInterfaces().Any(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IClassFixture<>)) == true;
+        if (usesServer)
             ServerFixture.SettleAsync().GetAwaiter().GetResult();
     }
 }

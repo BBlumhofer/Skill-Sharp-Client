@@ -2,7 +2,7 @@ using OpenSmi.Client.Examples;
 
 // Usage: dotnet run -- <example> [url]
 var name = args.ElementAtOrDefault(0) ?? "";
-var url = args.ElementAtOrDefault(1) ?? (name == "quick_start" ? "opc.tcp://localhost:4841/" : "opc.tcp://localhost:4843/server");
+var url = args.ElementAtOrDefault(1) ?? (name == "quick_start" ? "opc.tcp://localhost:4841/server" : "opc.tcp://localhost:4843/server");
 using var cts = new CancellationTokenSource();
 Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
 var ct = cts.Token;

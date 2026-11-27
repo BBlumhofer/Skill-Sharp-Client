@@ -1,0 +1,17 @@
+/ExampleMachine RemoteMachine
+/ExampleMachine/Identification Identification
+/ExampleMachine/Identification/AssetId RemoteVariable
+/ExampleMachine/Identification/ComponentName RemoteVariable
+/ExampleMachine/Identification/Manufacturer RemoteVariable
+/ExampleMachine/Identification/ProductInstanceUri RemoteVariable
+/ExampleMachine/Identification/SerialNumber RemoteVariable
+/ExampleMachine/Lock RemoteLock
+/ExampleMachine/ParameterSet ParameterSet
+/ExampleMachine/ParameterSet/FaxNumber RemoteVariable
+/Users/developer RemoteUser
+/Users/operator RemoteUser
+/Users/orchestrator RemoteUser
+/Users/planner RemoteUser
+/Users/remote RemoteUser
+/Users/visitor RemoteUser
+/Users/watchdog RemoteUser
