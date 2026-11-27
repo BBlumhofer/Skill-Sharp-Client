@@ -109,8 +109,13 @@ public class RemoteSkill : RemoteCallable
 
     private protected override string? Folder => "SkillSet";
 
-    /// <summary>Cached, updated by subscription; initially Halted.</summary>
-    public SkillState CurrentState { get; private set; } = SkillState.Halted;
+    /// <summary>
+    /// Cached state, updated by subscription. Halted (the safest assumption) while the server reports no value, e.g.
+    /// with a bad status (see <see cref="CurrentStateSample"/>).
+    /// </summary>
+    public SkillState CurrentState => CurrentStateSample.Value;
+    /// <summary>Cached state with status and timestamps; BadWaitingForInitialData until the server reported one.</summary>
+    public Sample<SkillState> CurrentStateSample { get; private set; } = SampleUpdates.WaitingForInitialData(SkillState.Halted);
     public bool IsSuspendable => _suspend != null;
     /// <summary>From the type of the skill object (FiniteSkillType vs. ContinuousSkillType).</summary>
     public bool IsFinite => UaType.StartsWith("finite", StringComparison.OrdinalIgnoreCase);
@@ -151,7 +156,7 @@ public class RemoteSkill : RemoteCallable
     {
         var dv = (await UaUtil.ReadAsync(Session, [(_currentState!, Opc.Ua.Attributes.Value)], cancellationToken).ConfigureAwait(false))[0];
         OpenSmiStatusException.ThrowIfBad(dv.StatusCode, $"Read of {Path} state");
-        return ParseState(BaseRemoteComponent.StateText(dv.Value));
+        return dv.Value == null ? SkillState.Halted : ParseState(SampleUpdates.StateText(dv.Value));
     }
 
     public override async Task<string> ReadUaTypeAsync(CancellationToken cancellationToken = default)
@@ -163,7 +168,7 @@ public class RemoteSkill : RemoteCallable
     internal static SkillState ParseState(string text) =>
         text.Length == 0 ? SkillState.Halted
         : Enum.TryParse<SkillState>(text, ignoreCase: true, out var s) && Enum.IsDefined(s) && !int.TryParse(text, out _) ? s
-        : throw new OpenSmiProtocolException($"Unknown skill state '{text}'");
+        : throw new OpenSmiUnknownStateException($"Unknown skill state '{text}'");
 
     private protected override Func<Task>? HandleChild(string name, NodeId nodeId, CancellationToken ct) =>
         name == "StateMachine" ? () => BrowseStateMachineAsync(nodeId, ct) : null;
@@ -179,6 +184,10 @@ public class RemoteSkill : RemoteCallable
         _halt = Required("Halt");
         _reset = Required("Reset");
         _suspend = children.Child("Suspend") is { } s ? UaUtil.ToNodeId(Session, s.NodeId) : null;
+        // The state is read before subscribing, so it is known when ConnectAsync returns (Python waits for the
+        // first notification); the subscription's initial value then only confirms it.
+        var initial = (await UaUtil.ReadAsync(Session, [(_currentState, Opc.Ua.Attributes.Value)], ct).ConfigureAwait(false))[0];
+        await OnStateAsync(initial).ConfigureAwait(false);
         await Server.Subscriptions.SubscribeDataChangeAsync([(_currentState, OnStateAsync)], ct).ConfigureAwait(false);
     }
 
@@ -213,23 +222,25 @@ public class RemoteSkill : RemoteCallable
 
     private Task OnStateAsync(DataValue dv)
     {
-        SkillState state;
-        try { state = ParseState(BaseRemoteComponent.StateText(dv.Value)); }
-        catch (OpenSmiProtocolException e)
-        {
-            Logger.LogWarning(e, "Ignoring state update of {Path}", Path);
-            return Task.CompletedTask;
-        }
+        Sample<SkillState> sample;
         lock (_stateGate)
         {
-            if (state == CurrentState) return Task.CompletedTask;
-            CurrentState = state;
-            if (state == SkillState.Halted) _haltCount++;
-            _stateChanged.SetResult();
-            _stateChanged = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            if (SampleUpdates.SkillState(CurrentStateSample, dv) is not var (s, changed, stateChanged))
+            {
+                Logger.LogWarning("Ignoring unknown state {Value} of {Path}", dv.Value, Path);
+                return Task.CompletedTask;
+            }
+            CurrentStateSample = sample = s;
+            if (!changed) return Task.CompletedTask; // e.g. only a new timestamp
+            if (stateChanged)
+            {
+                if (s.Value == SkillState.Halted) _haltCount++;
+                _stateChanged.SetResult();
+                _stateChanged = new(TaskCreationOptions.RunContinuationsAsynchronously);
+                _stateWatchers.Publish(s.Value);
+            }
         }
-        _stateWatchers.Publish(state);
-        return StateChanged.RaiseAsync(this, new(state), Logger);
+        return StateChanged.RaiseAsync(this, new(sample), Logger);
     }
 }
 

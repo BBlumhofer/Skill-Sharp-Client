@@ -29,7 +29,7 @@ public class ExamplesTests(ExamplesServer fixture) : IClassFixture<ExamplesServe
     public async Task Cold_start_brings_up_startup_skill_and_runs_dummy_skill()
     {
         var output = await OutputOfAsync(() => ColdStartExample.RunAsync(Url));
-        Assert.Contains("Skill `DummySkill` now in state `Completed`", output);
+        Assert.Contains("Skill `DummySkill` now in state `Completed` (Good)", output);
         Assert.Contains("results:", output);
     }
 
@@ -53,8 +53,10 @@ public class ExamplesTests(ExamplesServer fixture) : IClassFixture<ExamplesServe
     public async Task History_prints_the_last_values()
     {
         var output = await OutputOfAsync(() => HistoryExample.RunAsync(Url));
+        var lines = output.Split('\n', StringSplitOptions.RemoveEmptyEntries);
         Assert.StartsWith("RandomValue=", output);
-        Assert.InRange(output.Split('\n', StringSplitOptions.RemoveEmptyEntries).Length, 2, 11);
+        Assert.InRange(lines.Length, 2, 11);
+        Assert.All(lines.Skip(1), l => Assert.Contains("(Good, ", l)); // samples with quality and timestamp
     }
 
     [Fact]

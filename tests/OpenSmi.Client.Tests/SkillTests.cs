@@ -14,7 +14,7 @@ public class SkillStateParsingTests
     [InlineData("Bogus")]
     [InlineData("13")]
     public void Unknown_state_text_is_a_protocol_error(string text) =>
-        Assert.Throws<OpenSmiProtocolException>(() => RemoteSkill.ParseState(text));
+        Assert.Throws<OpenSmiUnknownStateException>(() => RemoteSkill.ParseState(text));
 
     [Fact]
     public void Notification_message_suffix_is_only_split_without_error_code()

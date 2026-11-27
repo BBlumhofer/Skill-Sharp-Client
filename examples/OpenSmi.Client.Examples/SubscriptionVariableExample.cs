@@ -13,7 +13,7 @@ public static class SubscriptionVariableExample
         foreach (var variable in machine.Components["DummyComponent"].Monitoring.Values)
             variable.ValueChanged += (sender, e) =>
             {
-                Console.WriteLine($"new value: {((RemoteVariable)sender).Path} = {e.Value.Value}");
+                Console.WriteLine($"new value: {((RemoteVariable)sender).Path} = {e.Sample}");
                 return Task.CompletedTask;
             };
 

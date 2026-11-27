@@ -28,7 +28,9 @@ public sealed class OpenSmiAccessDeniedException(StatusCode code, string message
 public sealed class OpenSmiInvalidStateException(StatusCode code, string message) : OpenSmiStatusException(code, message);
 public sealed class OpenSmiAuthenticationException(string message, Exception? inner = null) : OpenSmiException(message, inner);
 public sealed class OpenSmiConnectionException(string message, Exception? inner = null) : OpenSmiException(message, inner);
-public sealed class OpenSmiProtocolException(string message) : OpenSmiException(message);
+public class OpenSmiProtocolException(string message) : OpenSmiException(message);
+/// <summary>The server reported a state value that matches no known state.</summary>
+public sealed class OpenSmiUnknownStateException(string message) : OpenSmiProtocolException(message);
 public sealed class OpenSmiInvalidValueException(string message, Exception? inner = null) : OpenSmiException(message, inner);
 public sealed class SkillHaltedException(string message) : OpenSmiException(message);
 public sealed class SkillNotSuspendableException(string message) : OpenSmiException(message);

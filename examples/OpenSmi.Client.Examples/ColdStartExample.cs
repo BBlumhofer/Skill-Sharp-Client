@@ -18,7 +18,7 @@ public static class ColdStartExample
             Console.WriteLine($"Skill '{name}' is in state '{s.CurrentState}'");
             s.StateChanged += (sender, e) => // get notified of skill state changes
             {
-                Console.WriteLine($"Skill `{((RemoteSkill)sender).Name}` now in state `{e.State}`");
+                Console.WriteLine($"Skill `{((RemoteSkill)sender).Name}` now in state `{e.State}` ({e.Sample.Quality})");
                 return Task.CompletedTask;
             };
         }

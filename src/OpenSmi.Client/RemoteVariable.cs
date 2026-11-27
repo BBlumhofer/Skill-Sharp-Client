@@ -4,8 +4,6 @@ using Opc.Ua;
 
 namespace OpenSmi.Client;
 
-public sealed record TimestampedValue(object? Value, DateTime Timestamp);
-
 /// <summary>Port of <c>client/remote_variable.py</c>. All values are cached and updated by subscription.</summary>
 public sealed class RemoteVariable : RemoteUaObject
 {
@@ -14,33 +12,40 @@ public sealed class RemoteVariable : RemoteUaObject
     internal RemoteVariable(string name, string segment, NodeId nodeId, RemoteServer server, RemoteUaObject parent)
         : base(name, nodeId, server, parent, segment: segment) { }
 
+    /// <summary>
+    /// Cached sample: processed value (<see cref="ValidValues"/> keys mapped to their display names), status and
+    /// timestamps. BadWaitingForInitialData until the first value was read or received.
+    /// </summary>
+    public Sample<object?> Sample { get; private set; } = SampleUpdates.WaitingForInitialData<object?>(null);
     /// <summary>Cached value, processed: <see cref="ValidValues"/> keys are mapped to their display names.</summary>
-    public object? Value => Process(RawValue);
-    public Variant RawValue { get; private set; } = Variant.Null;
-    /// <summary>ServerTimestamp of the cached value.</summary>
-    public DateTime? Timestamp { get; private set; }
+    public object? Value => Sample.Value;
+    public Variant RawValue => Sample.Variant ?? Variant.Null;
+    /// <summary>Timestamp of the cached sample: source timestamp, falling back to the server timestamp.</summary>
+    public DateTime? Timestamp => Sample.Timestamp;
     /// <summary>From the per-user access level of the logged-in user.</summary>
     public bool IsWritable { get; private set; }
     public string UaDataType { get; private set; } = "";
-    public int UaValueRank { get; private set; }
+    /// <summary>-1 scalar (the OPC UA default, also if it cannot be read), 0 one or more dimensions, &gt;= 1 exact dimensions.</summary>
+    public int UaValueRank { get; private set; } = ValueRanks.Scalar;
     /// <summary>For NodeId values: NodeId string → DisplayName of all <c>Utilizes</c> targets, plus "" → "&lt;None&gt;".
     /// For custom enum DataTypes: value ("0") → member name.</summary>
     public IReadOnlyDictionary<string, string> ValidValues { get; private set; } = NoValidValues;
     public EUInformation? Unit { get; private set; }
     public Opc.Ua.Range? Range { get; private set; }
     public event AsyncEventHandler<VariableValueChangedEventArgs>? ValueChanged;
-    private readonly Watchers<Variant> _valueWatchers = new();
+    private readonly Watchers<Sample<object?>> _valueWatchers = new();
 
-    /// <summary>Yields <see cref="RawValue"/> first, then every change; a slow reader skips the oldest changes.</summary>
-    public IAsyncEnumerable<Variant> WatchValueAsync(CancellationToken cancellationToken = default) =>
-        _valueWatchers.WatchAsync(() => RawValue, cancellationToken);
+    /// <summary>Yields <see cref="Sample"/> first, then every change; a slow reader skips the oldest changes.</summary>
+    public IAsyncEnumerable<Sample<object?>> WatchValueAsync(CancellationToken cancellationToken = default) =>
+        _valueWatchers.WatchAsync(() => Sample, cancellationToken);
 
     private protected override async Task InitCoreAsync(CancellationToken ct)
     {
         var r = await UaUtil.ReadAsync(Session, [(NodeId, Opc.Ua.Attributes.DataType), (NodeId, Opc.Ua.Attributes.Value),
             (NodeId, Opc.Ua.Attributes.ValueRank), (NodeId, Opc.Ua.Attributes.UserAccessLevel)], ct).ConfigureAwait(false);
         var dataType = r[0].Value as NodeId;
-        UaValueRank = r[2].Value is int rank ? rank : 0;
+        if (r[2].Value is int rank) UaValueRank = rank;
+        else Logger.LogWarning("Could not read ValueRank of {Path} ({Status}), assuming scalar", Path, r[2].StatusCode);
         IsWritable = r[3].Value is byte level && (level & AccessLevels.CurrentWrite) != 0;
 
         if (dataType is { NamespaceIndex: 0, IdType: IdType.Numeric })
@@ -77,7 +82,7 @@ public sealed class RemoteVariable : RemoteUaObject
             if (value is Opc.Ua.Range rg) Range = rg;
         }
 
-        Update(r[1]);
+        Sample = OpenSmi.Client.Sample.FromDataValue<object?>(r[1], Process);
     }
 
     public async Task<object?> ReadValueAsync(bool updateCache = false, CancellationToken cancellationToken = default)
@@ -89,6 +94,14 @@ public sealed class RemoteVariable : RemoteUaObject
 
     public async Task<Variant> ReadRawValueAsync(CancellationToken cancellationToken = default) =>
         (await ReadDataValueAsync(cancellationToken).ConfigureAwait(false)).WrappedValue;
+
+    /// <summary>Reads the sample from the server, also with a bad status (no exception).</summary>
+    public async Task<Sample<object?>> ReadSampleAsync(bool updateCache = false, CancellationToken cancellationToken = default)
+    {
+        var dv = (await UaUtil.ReadAsync(Session, [(NodeId, Opc.Ua.Attributes.Value)], cancellationToken).ConfigureAwait(false))[0];
+        if (updateCache) await OnDataChangeAsync(dv).ConfigureAwait(false);
+        return OpenSmi.Client.Sample.FromDataValue<object?>(dv, Process);
+    }
 
     /// <summary>
     /// Writes <paramref name="value"/> converted to the type of the cached value (e.g. int → Double, string →
@@ -130,8 +143,8 @@ public sealed class RemoteVariable : RemoteUaObject
     private async Task<StatusCode> WriteAsync(WriteValue write, CancellationToken ct) =>
         (await Session.WriteAsync(null, [write], ct).ConfigureAwait(false)).Results[0];
 
-    /// <summary>Raw history (HistoryRead). <paramref name="numValues"/> 0 = unlimited; entries without value are skipped.</summary>
-    public async Task<IReadOnlyList<TimestampedValue>> ReadHistoryAsync(DateTime? start = null, DateTime? end = null,
+    /// <summary>Raw history (HistoryRead) as samples. <paramref name="numValues"/> 0 = unlimited.</summary>
+    public async Task<IReadOnlyList<Sample<object?>>> ReadHistoryAsync(DateTime? start = null, DateTime? end = null,
         uint numValues = 0, bool returnBounds = true, CancellationToken cancellationToken = default)
     {
         // DateTime.MinValue encodes as "unspecified", like asyncua's win epoch default.
@@ -140,7 +153,7 @@ public sealed class RemoteVariable : RemoteUaObject
             StartTime = start ?? DateTime.MinValue, EndTime = end ?? DateTime.MinValue,
             NumValuesPerNode = numValues, ReturnBounds = returnBounds,
         });
-        var result = new List<TimestampedValue>();
+        var result = new List<Sample<object?>>();
         byte[]? continuation = null;
         do
         {
@@ -149,7 +162,7 @@ public sealed class RemoteVariable : RemoteUaObject
             var r = response.Results[0];
             OpenSmiStatusException.ThrowIfBad(r.StatusCode, $"History read of {Path}");
             if (ExtensionObject.ToEncodeable(r.HistoryData) is HistoryData data)
-                result.AddRange(data.DataValues.Where(dv => dv.Value != null).Select(dv => new TimestampedValue(dv.Value, dv.ServerTimestamp)));
+                result.AddRange(data.DataValues.Select(dv => OpenSmi.Client.Sample.FromDataValue<object?>(dv, Process)));
             continuation = r.ContinuationPoint is { Length: > 0 } cp ? cp : null;
         } while (continuation != null && (numValues == 0 || result.Count < numValues));
         return result;
@@ -164,20 +177,14 @@ public sealed class RemoteVariable : RemoteUaObject
         return value;
     }
 
-    /// <returns>Whether the cached value changed.</returns>
-    private bool Update(DataValue dv)
-    {
-        Timestamp = dv.ServerTimestamp == DateTime.MinValue ? null : dv.ServerTimestamp;
-        if (RawValue.Equals(dv.WrappedValue)) return false;
-        RawValue = dv.WrappedValue;
-        return true;
-    }
-
+    /// <summary>Updates the cache; ValueChanged only if the value or its status changed.</summary>
     internal Task OnDataChangeAsync(DataValue dv)
     {
-        if (!Update(dv)) return Task.CompletedTask;
-        _valueWatchers.Publish(RawValue);
-        return ValueChanged.RaiseAsync(this, new(RawValue), Logger);
+        var (sample, changed) = SampleUpdates.Variable(Sample, dv, Process);
+        Sample = sample;
+        if (!changed) return Task.CompletedTask;
+        _valueWatchers.Publish(sample);
+        return ValueChanged.RaiseAsync(this, new(sample), Logger);
     }
 
     private async Task<DataValue> ReadDataValueAsync(CancellationToken ct)

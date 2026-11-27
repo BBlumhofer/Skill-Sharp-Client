@@ -16,10 +16,19 @@ public delegate Task AsyncEventHandler<in TEventArgs>(object sender, TEventArgs 
 
 public sealed record ServerStatusChangedEventArgs(RemoteServerStatus Status);
 public sealed record ServerTimeUpdatedEventArgs(DateTime Time);
-public sealed record ComponentStatusChangedEventArgs(string State);
+public sealed record ComponentStatusChangedEventArgs(Sample<MachineryItemState?> Sample)
+{
+    public MachineryItemState? State => Sample.Value;
+}
 public sealed record NotificationReceivedEventArgs(NotificationEvent Notification);
-public sealed record SkillStateChangedEventArgs(SkillState State);
-public sealed record VariableValueChangedEventArgs(Variant Value);
+public sealed record SkillStateChangedEventArgs(Sample<SkillState> Sample)
+{
+    public SkillState State => Sample.Value;
+}
+public sealed record VariableValueChangedEventArgs(Sample<object?> Sample)
+{
+    public object? Value => Sample.Value;
+}
 public sealed record LockedChangedEventArgs(bool Locked);
 public sealed record LockingUserChangedEventArgs(string User);
 public sealed record RenewDueEventArgs(double RemainingMs);

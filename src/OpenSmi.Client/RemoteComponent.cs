@@ -49,21 +49,28 @@ public abstract class BaseRemoteComponent : RemoteUaObject
     public Monitoring Monitoring { get; }
     public Attributes Attributes { get; }
     public ParameterSet ParameterSet { get; }
-    /// <summary>Cached MachineryItemState text, "Unknown" until known.</summary>
-    public string CurrentState { get; private set; } = "Unknown";
+    /// <summary>
+    /// Cached state; <c>null</c> without a CurrentState node (e.g. resources), while the server reported none yet, or
+    /// with a bad status (see <see cref="CurrentStateSample"/>). Empty or unknown values keep the last valid state.
+    /// </summary>
+    public MachineryItemState? CurrentState => CurrentStateSample?.Value;
+    /// <summary>Cached state with status and timestamps; <c>null</c> without a CurrentState node.</summary>
+    public Sample<MachineryItemState?>? CurrentStateSample => _currentStateNode == null ? null : _currentStateSample;
+    private Sample<MachineryItemState?> _currentStateSample = SampleUpdates.WaitingForInitialData<MachineryItemState?>(null);
     public event AsyncEventHandler<ComponentStatusChangedEventArgs>? StatusChanged;
     public event AsyncEventHandler<NotificationReceivedEventArgs>? NotificationReceived;
 
     internal RemoteLock? LockOrNull { get; private set; }
     private NodeId? _currentStateNode;
 
-    /// <summary>Reads MachineryItemState/CurrentState as text, "Unknown" if the node is absent.</summary>
-    public async Task<string> ReadCurrentStateAsync(CancellationToken cancellationToken = default)
+    /// <summary>Reads MachineryItemState/CurrentState; <c>null</c> without the node or for an empty value.</summary>
+    /// <exception cref="OpenSmiUnknownStateException">The server reports a state that is no <see cref="MachineryItemState"/>.</exception>
+    public async Task<MachineryItemState?> ReadCurrentStateAsync(CancellationToken cancellationToken = default)
     {
-        if (_currentStateNode == null) return "Unknown";
+        if (_currentStateNode == null) return null;
         var dv = (await UaUtil.ReadAsync(Session, [(_currentStateNode, Opc.Ua.Attributes.Value)], cancellationToken).ConfigureAwait(false))[0];
         OpenSmiStatusException.ThrowIfBad(dv.StatusCode, $"Read of {Path} current state");
-        return StateText(dv.Value);
+        return SampleUpdates.ParseItemState(dv.Value);
     }
 
     private protected override async Task InitCoreAsync(CancellationToken ct)
@@ -120,8 +127,12 @@ public abstract class BaseRemoteComponent : RemoteUaObject
 
             var state = (await UaUtil.BrowseChildrenAsync(Session, id, ct).ConfigureAwait(false)).Child("CurrentState");
             if (state == null) continue;
-            _currentStateNode = UaUtil.ToNodeId(Session, state.NodeId);
-            await Server.Subscriptions.SubscribeDataChangeAsync([(_currentStateNode, OnCurrentStateAsync)], ct).ConfigureAwait(false);
+            var stateNode = UaUtil.ToNodeId(Session, state.NodeId);
+            // read before subscribing, so the state is known when ConnectAsync returns (like skills)
+            await OnCurrentStateAsync((await UaUtil.ReadAsync(Session, [(stateNode, Opc.Ua.Attributes.Value)], ct).ConfigureAwait(false))[0])
+                .ConfigureAwait(false);
+            _currentStateNode = stateNode;
+            await Server.Subscriptions.SubscribeDataChangeAsync([(stateNode, OnCurrentStateAsync)], ct).ConfigureAwait(false);
         }
     }
 
@@ -183,10 +194,13 @@ public abstract class BaseRemoteComponent : RemoteUaObject
 
     private Task OnCurrentStateAsync(DataValue dv)
     {
-        var state = StateText(dv.Value);
-        if (state == CurrentState) return Task.CompletedTask;
-        CurrentState = state;
-        return StatusChanged.RaiseAsync(this, new(state), Logger);
+        if (SampleUpdates.ComponentState(_currentStateSample, dv) is not var (sample, changed))
+        {
+            Logger.LogWarning("Ignoring empty or unknown machinery item state {Value} of {Path}", dv.Value, Path);
+            return Task.CompletedTask;
+        }
+        _currentStateSample = sample;
+        return changed ? StatusChanged.RaiseAsync(this, new(sample), Logger) : Task.CompletedTask;
     }
 
     private Task OnEventAsync(EventFieldList fields)
@@ -201,13 +215,6 @@ public abstract class BaseRemoteComponent : RemoteUaObject
         }
         return NotificationReceived.RaiseAsync(this, new(notification), Logger);
     }
-
-    internal static string StateText(object? value) => value switch
-    {
-        LocalizedText lt => lt.Text ?? "",
-        null => "",
-        _ => value.ToString() ?? "",
-    };
 }
 
 public sealed class RemoteComponent : BaseRemoteComponent

@@ -94,12 +94,24 @@ public class BrowseModelTests
     }
 
     [Fact]
-    public async Task Component_state_is_read_and_cached()
+    public async Task States_and_values_are_known_with_status_and_timestamps_after_connect()
     {
         await using var server = await ServerFixture.ConnectAsync();
         var machine = server.Machines["DummyMachine"];
+
         var state = await machine.ReadCurrentStateAsync();
-        Assert.NotEqual("Unknown", state);
+        Assert.NotNull(state);
         Assert.Equal(state, machine.CurrentState);
+        Assert.Equal(Quality.Good, machine.CurrentStateSample!.Quality);
+        Assert.Null(machine.Resources.Values.First().CurrentStateSample); // resources have no CurrentState node
+
+        var startup = machine.SkillSet["StartupSkill"];
+        Assert.Equal(Quality.Good, startup.CurrentStateSample.Quality); // not waiting for the first notification
+        Assert.Equal(await startup.ReadCurrentStateAsync(), startup.CurrentState);
+
+        var parameter = machine.ParameterSet["DummyFloatParameter"];
+        Assert.Equal(Quality.Good, parameter.Sample.Quality);
+        Assert.NotNull(parameter.Timestamp);
+        Assert.Equal(parameter.Value, (await parameter.ReadSampleAsync()).Value);
     }
 }
