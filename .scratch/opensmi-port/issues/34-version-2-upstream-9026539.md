@@ -23,7 +23,9 @@ Beispielserver von opensmi-server.
   was Beispiele flaky machte). `ReadAllAsync` nach Segment.
 - opensmi-server 0.3 gibt den Lock eines Users bis zu 1 s nach dem Schließen *irgendeiner* Session dieses Users
   frei → Tests warten nach jedem Test (`ServerFixture.SettleAsync`).
-- `Requirements`: Server 0.3 hängt sie an das Skill-Objekt, Python liest sie nur unter `SkillExecution` → beide
-  liefern leer. Wie Python übernommen; **offene Frage** an den Nutzer/upstream.
-- Paket: `OpenSmi.Client` 2.0.0 (PackageId unverändert). `legacy/` gelöscht; Tag `skillsharp-legacy-final` auf
-  `e57b3c0` ist nicht gesetzt (Tag-Push braucht Freigabe).
+- `Requirements`: Server 0.3 hängt sie an das Skill-Objekt, Python liest sie nur unter `SkillExecution` und
+  findet nichts. Nutzerentscheidung: füllen. Der Skill liest beide Stellen, Checks erben sie nicht (DEVIATIONS).
+- Paket: PackageId `SkillSharp.Client` 2.0.0 (Nutzerentscheidung), Namespace/Assembly `OpenSmi.Client`.
+  `legacy/` gelöscht, Tag `skillsharp-legacy-final` auf `e57b3c0` gesetzt.
+- CI: Actions auf Node 24 (Issue #10), Paket als Artefakt. Doku-Überarbeitung aus PR #2 (`opensmi-port`,
+  Commits cf50687, b62ed14) übernommen; dessen Code-Teil war hier schon anders gelöst.

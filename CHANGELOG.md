@@ -2,9 +2,10 @@
 
 ## 2.0.0 (2026-11-27)
 
-`OpenSmi.Client` 2.0.0 replaces `SkillSharp.Client` 1.x completely. It is a port of the Python
+Version 2.0.0 of the package `SkillSharp.Client` replaces the old client 1.x completely; namespace and
+assembly are `OpenSmi.Client`. It is a port of the Python
 `opensmi-client` at `9026539` (opensmi-core 0.7.1) and is tested against `opensmi-server` 0.3.1. The old
-client is removed from the repository; its last state is commit `e57b3c0`.
+client is removed from the repository; its last state is tagged `skillsharp-legacy-final` (`e57b3c0`).
 
 ### Breaking changes compared to the first port (`e8740c2`)
 
@@ -38,6 +39,10 @@ client is removed from the repository; its last state is commit `e57b3c0`.
 - Notifications are routed by monitored item and read `ErrorCode` from the MachineSet AlertType, so
   alerts of opensmi-server 0.3 arrive with their code even when their source is a child object.
 - Skill and component states are read while browsing, so they are known when `ConnectAsync` returns.
+- `RemoteSkill.DependsOn` is filled again on opensmi-server 0.3, which moved `Requirements` from
+  `SkillExecution` to the skill object; both places are read.
+- CI: actions on Node.js 24 (`checkout@v7`, `setup-dotnet@v6`, `setup-python@v7`, `upload-artifact@v7`),
+  the NuGet package is built and uploaded as artifact `nuget-package`.
 - Tests against every opensmi-server example (check, dictionary_entries, quick_start, rsl, dummy) and a
   port of the upstream test server, each compared with the Python client as oracle.
 

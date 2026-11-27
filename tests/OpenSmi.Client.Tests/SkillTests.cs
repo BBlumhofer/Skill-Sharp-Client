@@ -197,14 +197,16 @@ public class SkillTests
     }
 
     [Fact]
-    public async Task Requirements_are_read_below_skill_execution_only()
+    public async Task Requirements_give_dependencies()
     {
-        // Like the Python client: opensmi-server 0.3 puts Requirements below the skill object, not below
-        // SkillExecution, so the dependencies of CompositeDummySkill stay empty (open question, see map.md).
+        // opensmi-server 0.3 puts Requirements below the skill object (older servers below SkillExecution);
+        // Python reads only SkillExecution and finds nothing here (DEVIATIONS).
         await using var server = await ServerFixture.ConnectAsync();
         var skills = server.Machines["DummyMachine"].SkillSet;
-        Assert.Empty(skills["CompositeDummySkill"].DependsOn);
+
+        Assert.Equal([NodeId.Parse("ns=1;s=DummyMachine.SkillSet.DummySkill")], skills["CompositeDummySkill"].DependsOn);
         Assert.Empty(skills["DummySkill"].DependsOn);
+        Assert.Empty(server.Machines["DummyMachine"].MethodSet["DummyMethod"].DependsOn);
     }
 
     [Fact]

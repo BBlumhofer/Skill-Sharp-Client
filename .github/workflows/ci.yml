@@ -3,6 +3,7 @@ name: CI
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 env:
   OPENSMI_SERVER_REF: v0.3.1
@@ -11,25 +12,31 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
         with:
           repository: SmartFactory-KL/opensmi-server
           ref: ${{ env.OPENSMI_SERVER_REF }}
           path: opensmi-server
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: |
             8.0.x
             10.0.x
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       - run: pip install ./opensmi-server
-      - run: dotnet test OpenSmi.Client.slnx --logger trx --results-directory TestResults
+      - run: dotnet build OpenSmi.Client.slnx
+      - run: dotnet test OpenSmi.Client.slnx --no-build --logger trx --results-directory TestResults
         env:
           OPENSMI_SERVER_DIR: ${{ github.workspace }}/opensmi-server/examples/dummy
-      - uses: actions/upload-artifact@v4
+      - run: dotnet pack src/OpenSmi.Client -c Release -o packages
+      - uses: actions/upload-artifact@v7
+        with:
+          name: nuget-package
+          path: packages/*.nupkg
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: test-results

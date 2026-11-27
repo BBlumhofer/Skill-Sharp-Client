@@ -184,7 +184,7 @@ internal sealed class SubscriptionManager : IAsyncDisposable
                 catch (Exception e) when (e is not OperationCanceledException) { _logger.LogWarning(e, "Could not rebuild subscription"); }
             }
         }
-        catch (OperationCanceledException) { }
+        catch (OperationCanceledException) { } // DisposeAsync cancels _stop to end the heartbeat; nothing to do
     }
 
     /// <summary>Deletes the subscription and creates a new one with every data and event item.</summary>

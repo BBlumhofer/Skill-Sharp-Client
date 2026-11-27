@@ -1,9 +1,12 @@
 # Abweichungen vom Python-Client
 
-Der C#-Client (2.0.0) verhält sich wie `opensmi-client @ 9026539`, außer an den Stellen aus
-[SPEC §10](SPEC.md#10-bewusste-abweichungen-vom-python-original-zusammenfassung). Jede Zeile nennt die
-Stelle im Code und den Test, der das Verhalten belegt (alle Tests in `tests/OpenSmi.Client.Tests`).
-Behebt upstream einen der Fehler, wird das Verhalten hier angeglichen.
+Der C#-Client (2.0.0) verhält sich wie `opensmi-client @ 9026539`, außer an den Stellen in dieser Tabelle.
+Die Zeilen stammen aus [SPEC §10](SPEC.md#10-bewusste-abweichungen-vom-python-original-zusammenfassung) und aus
+späteren Entscheidungen (Tickets 25, 26, 30 und 34 unter `.scratch/opensmi-port/issues`). Jede Zeile nennt die
+Stelle im Code und den Test, der das Verhalten belegt; alle Tests liegen in `tests/OpenSmi.Client.Tests`. Behebt
+upstream einen der Fehler, wird das Verhalten angeglichen.
+
+Hinweis: Dieses Dokument wurde mit KI-Unterstützung (Claude, Anthropic) erstellt; siehe den KI-Hinweis im README.
 
 | Python | C# | Code | Test |
 |---|---|---|---|
@@ -17,10 +20,9 @@ Behebt upstream einen der Fehler, wird das Verhalten hier angeglichen.
 | `RemoteSkill.read_current_state` wirft `KeyError` bei unbekanntem Zustand; `_parse_item_state` wirft `UnknownStateError` | beide werfen `OpenSmiUnknownStateException` (abgeleitet von `OpenSmiProtocolException`) | `Sample.cs` (`SampleUpdates.ParseItemState`), `RemoteCallable.cs` (`RemoteSkill.ParseState`) | `SkillStateParsingTests.Unknown_state_text_is_a_protocol_error`, `SampleTests.Empty_item_state_is_null_and_unknown_throws` |
 | Skill- und Komponentenzustand sind bis zur ersten Notification `HALTED`/`None` mit `BadWaitingForInitialData` | Der Zustand wird beim Browsen einmal gelesen, bevor abonniert wird; nach `ConnectAsync` ist er bekannt | `RemoteCallable.cs` (`BrowseStateMachineAsync`), `RemoteComponent.cs` (`BrowseBuildingBlocksAsync`) | `BrowseModelTests.States_and_values_are_known_with_status_and_timestamps_after_connect` |
 | `read_all` liefert ein Dict nach `variable.name`, `write_all` und `[...]` nehmen das Segment | `ReadAllAsync` liefert ebenfalls nach Segment (dem Schlüssel des Containers), damit Lesen und Schreiben dieselben Schlüssel haben; bei gültigen Namen sind beide gleich | `RemoteVariableContainer.cs` (`ReadAllAsync`) | `ObjectModelTests.Names_from_other_servers_are_sanitized_and_suffixed` |
+| `_browse_dependencies` liest nur `SkillExecution/Requirements`; opensmi-server 0.3 legt `Requirements` am Skill-Objekt ab, `ua_depends_on` bleibt dort leer | Der Skill liest beide Stellen; Checks erben die `Requirements` ihres Skills nicht | `RemoteCallable.cs` (`RequirementsOwner`, `BrowseDependenciesAsync`) | `SkillTests.Requirements_give_dependencies` |
 | `read_all`/`write_all` lesen und schreiben einzeln nacheinander | ein Read- bzw. Write-Request; abgelehnte Werte laufen einzeln über `WriteValueAsync` | `RemoteVariableContainer.cs` (`ReadAllAsync`, `WriteAllAsync`) | `WriteTests.Write_all_writes_a_batch_and_rejects_unknown_names_before_writing` |
 | `Signal` mit `connect(handler)`, Handler laufen nebenläufig (`gather`) | `event AsyncEventHandler<XxxEventArgs>` (`+=`/`-=`), Handler laufen nacheinander in Anmeldereihenfolge, Fehler je Handler geloggt; dazu `WatchStateAsync`/`WatchValueAsync`/`WatchStatusAsync` als `IAsyncEnumerable` (erst der aktuelle Wert, kleiner Puffer, älteste Werte fallen weg) | `AsyncEvents.cs`, `RemoteCallable.cs` (`RemoteSkill.WatchStateAsync`), `RemoteVariable.cs` (`WatchValueAsync`), `RemoteServer.cs` (`WatchStatusAsync`) | `EventTests`, `SkillTests.Watch_state_sees_running_and_completed` |
 | Unit-Enum in Großbuchstaben (`CENTIMETRE`) | PascalCase (`Unit.Centimetre`); `EUInformation.Description` bleibt der Python-Name | `tools/generate_units.py`, `Unit.g.cs`, `Units.cs` | `UnitTests.Eu_information_round_trips_like_python` |
 | Custom-Datentypen: `load_data_type_definitions` beim Connect (global, Enums und Structs), Enum-Wert als `IntEnum`-Member (JSON: Zahl) | Je Variable mit eigenem DataType wird `DataTypeDefinition` gelesen, nur Enums: `ValidValues` = `"0"` → Name, `Value` = Membername (`"Green"`); Structs bleiben `ExtensionObject`; Lesefehler nur Warnung | `RemoteVariable.cs` (`InitCoreAsync`) | `CustomTypeTests.Enum_variable_exposes_type_name_valid_values_and_member_name` |
 | Schreiben eines Enum-Membernamens scheitert (asyncua-Serialisierungsfehler, nicht abgefangen); Anzeigename wird erst nach Ablehnung als Schlüssel neu geschrieben | Ein Anzeigename aus `ValidValues` wird vor dem Schreiben auf seinen Schlüssel abgebildet (gilt auch für `WriteAllAsync`); nicht konvertierbarer Wert → `OpenSmiInvalidValueException` | `RemoteVariable.cs` (`ToWriteValue`) | `CustomTypeTests.Enum_variable_is_written_by_member_name_or_number` |
-
-Alle Abweichungen aus SPEC §10 sind umgesetzt.

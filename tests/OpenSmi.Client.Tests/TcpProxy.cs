@@ -54,7 +54,7 @@ public sealed class TcpProxy : IDisposable
     private static async Task PipeAsync(TcpClient from, TcpClient to)
     {
         try { await from.GetStream().CopyToAsync(to.GetStream()); }
-        catch (Exception e) when (e is IOException or ObjectDisposedException or InvalidOperationException) { }
+        catch (Exception e) when (e is IOException or ObjectDisposedException or InvalidOperationException) { } // connection closed
         from.Dispose();
         to.Dispose();
     }

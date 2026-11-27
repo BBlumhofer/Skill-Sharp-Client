@@ -44,10 +44,21 @@ public abstract class RemoteCallable : RemoteUaObject
             };
             if (run != null) work.Add(($"{Path}/{name}", run));
         }
+        if (RequirementsOwner is { } owner)
+            work.Add(($"{Path}/Requirements", () => BrowseOwnerRequirementsAsync(owner, ct)));
         await GatherAsync(work).ConfigureAwait(false);
         await Server.Subscriptions.SubscribeDataChangeAsync(
             new RemoteVariableContainer[] { Monitoring, FinalResultData, ParameterSet }.SelectMany(c => c.SubscriptionItems),
             ct).ConfigureAwait(false);
+    }
+
+    /// <summary>A further node whose <c>Requirements</c> belong to this callable (the skill object of a skill).</summary>
+    private protected virtual NodeId? RequirementsOwner => null;
+
+    private async Task BrowseOwnerRequirementsAsync(NodeId owner, CancellationToken ct)
+    {
+        if ((await UaUtil.BrowseChildrenAsync(Session, owner, ct).ConfigureAwait(false)).Child("Requirements") is { } requirements)
+            await BrowseDependenciesAsync(UaUtil.ToNodeId(Session, requirements.NodeId), ct).ConfigureAwait(false);
     }
 
     /// <summary>Handles the type-specific children (Call, StateMachine); null if nothing to do.</summary>
@@ -57,7 +68,13 @@ public abstract class RemoteCallable : RemoteUaObject
     {
         var refs = (await UaUtil.BrowseAsync(Session, [requirements], ReferenceTypeIds.Requires, BrowseDirection.Both, 0, ct)
             .ConfigureAwait(false))[0];
-        foreach (var r in refs) (r.IsForward ? _dependsOn : _dependencyOf).Add(UaUtil.ToNodeId(Session, r.NodeId));
+        lock (_dependsOn)
+            foreach (var r in refs)
+            {
+                var list = r.IsForward ? _dependsOn : _dependencyOf;
+                var id = UaUtil.ToNodeId(Session, r.NodeId);
+                if (!list.Contains(id)) list.Add(id);
+            }
     }
 }
 
@@ -108,6 +125,12 @@ public class RemoteSkill : RemoteCallable
     }
 
     private protected override string? Folder => "SkillSet";
+
+    /// <summary>
+    /// opensmi-server 0.3 puts <c>Requirements</c> below the skill object, older servers below SkillExecution;
+    /// both are read (Python reads only SkillExecution).
+    /// </summary>
+    private protected override NodeId? RequirementsOwner => _skillObject;
 
     /// <summary>
     /// Cached state, updated by subscription. Halted (the safest assumption) while the server reports no value, e.g.
@@ -258,4 +281,7 @@ public sealed class RemoteSkillCheck(RemoteSkill skill, string name, NodeId node
     public RemoteSkill Skill => _skill;
 
     private protected override ObjectPath BasePath => _skill.Path;
+
+    /// <summary>The skill object's Requirements belong to the skill, not to its checks.</summary>
+    private protected override NodeId? RequirementsOwner => null;
 }
