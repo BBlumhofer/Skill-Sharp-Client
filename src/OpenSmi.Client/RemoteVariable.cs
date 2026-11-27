@@ -11,8 +11,8 @@ public sealed class RemoteVariable : RemoteUaObject
 {
     private static readonly IReadOnlyDictionary<string, string> NoValidValues = new Dictionary<string, string>();
 
-    internal RemoteVariable(string name, NodeId nodeId, RemoteServer server, RemoteUaObject parent)
-        : base(name, nodeId, server, parent) { }
+    internal RemoteVariable(string name, string segment, NodeId nodeId, RemoteServer server, RemoteUaObject parent)
+        : base(name, nodeId, server, parent, segment: segment) { }
 
     /// <summary>Cached value, processed: <see cref="ValidValues"/> keys are mapped to their display names.</summary>
     public object? Value => Process(RawValue);

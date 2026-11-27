@@ -12,7 +12,6 @@ Func<Task>? example = name switch
     "auto_lock" => () => AutoLockExample.RunAsync(url, cancellationToken: ct),
     "browse_rules" => () => BrowseRulesExample.RunAsync(url, ct),
     "direct_component" => () => DirectComponentExample.RunAsync(url, ct),
-    "dto" => () => DtoExample.RunAsync(url, ct),
     "example" => () => ColdStartExample.RunAsync(url, ct),
     "history" => () => HistoryExample.RunAsync(url, ct),
     "method_call" => () => MethodCallExample.RunAsync(url, ct),
@@ -25,7 +24,7 @@ Func<Task>? example = name switch
 };
 if (example == null)
 {
-    Console.Error.WriteLine("Usage: dotnet run -- <auto_lock|browse_rules|direct_component|dto|example|history|method_call|" +
+    Console.Error.WriteLine("Usage: dotnet run -- <auto_lock|browse_rules|direct_component|example|history|method_call|" +
         "quick_start|security_policy|subscription_component|subscription_server|subscription_variable> [url]");
     return 1;
 }

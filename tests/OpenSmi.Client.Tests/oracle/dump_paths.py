@@ -1,25 +1,23 @@
-"""Oracle: path and node id of every object in DummyMachine.dto() of the Python opensmi-client (e8740c2).
+"""Oracle: every object the Python opensmi-client (9026539) finds below "/", as "<path> <type> [<aliases>]".
 
-Run with PYTHONPATH=<opensmi-client checkout>/src against the dummy server; writes dummy-machine-paths.txt.
-Current file: opensmi-server main 29e4d4a (the commit CI pins); older servers (e.g. 547ce5b) differ by 2 variables.
+Usage: python dump_paths.py <url> <user> <output file>
+  dummy-objects.txt:        opensmi-server 0.3.1 examples/dummy (opc.tcp://localhost:4843/server, orchestrator)
+  paths-server-objects.txt: ../servers/paths_server.py (opc.tcp://127.0.0.1:<port>/server, developer)
 """
-import asyncio, dataclasses, pathlib
+import asyncio
+import pathlib
+import sys
+
 from opensmi.client import RemoteServer
 
-def walk(node, out):
-    if isinstance(node, dict):
-        if "path" in node and "ua_node_id" in node:
-            out.add(f"{node['path']} {node['ua_node_id']}")
-        for v in node.values():
-            walk(v, out)
-    elif isinstance(node, list):
-        for v in node:
-            walk(v, out)
 
-async def main():
-    async with RemoteServer("opc.tcp://localhost:4843/server", username="orchestrator", password="orchestrator") as s:
-        out = set()
-        walk(dataclasses.asdict(s.machines["DummyMachine"].dto()), out)
-    pathlib.Path(__file__).with_name("dummy-machine-paths.txt").write_text("\n".join(sorted(out)) + "\n", encoding="utf8")
+async def main(url: str, user: str, output: str) -> None:
+    async with RemoteServer(url, username=user, password=user, auto_reconnect=False) as server:
+        lines = [
+            " ".join([str(obj.path), type(obj).__name__, *([",".join(sorted(map(str, obj.aliases)))] if obj.aliases else [])])
+            for obj in server.find("/**")
+        ]
+    pathlib.Path(output).write_text("\n".join(lines) + "\n", encoding="utf8")
 
-asyncio.run(main())
+
+asyncio.run(main(*sys.argv[1:4]))

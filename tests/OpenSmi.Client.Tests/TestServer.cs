@@ -11,16 +11,19 @@ namespace OpenSmi.Client.Tests;
 public sealed partial class TestServer : IAsyncDisposable
 {
     private readonly string _dir;
+    private readonly string _arguments;
     private Process? _process;
 
-    private TestServer(int port, string dir)
+    private TestServer(int port, string dir, string arguments = "main.py", string host = "localhost")
     {
         Port = port;
         _dir = dir;
+        _arguments = arguments;
+        Url = $"opc.tcp://{host}:{port}/server";
     }
 
     public int Port { get; }
-    public string Url => $"opc.tcp://localhost:{Port}/server";
+    public string Url { get; }
     /// <summary>The server's own certificate (DER), present once an encrypted server has started.</summary>
     public string CertificatePath => Path.Combine(_dir, "server_certificate.der");
 
@@ -42,6 +45,16 @@ public sealed partial class TestServer : IAsyncDisposable
         if (customTypes) AddCustomTypes(dir);
 
         var server = new TestServer(port, dir);
+        await server.StartAgainAsync();
+        return server;
+    }
+
+    /// <summary>Starts a server script of <c>servers/</c>, e.g. <c>paths_server.py</c>, with the port as first argument.</summary>
+    public static async Task<TestServer> StartScriptAsync(string script, int port, params string[] arguments)
+    {
+        var dir = Directory.CreateTempSubdirectory("opensmi-server-").FullName;
+        var path = Path.Combine(AppContext.BaseDirectory, "servers", script);
+        var server = new TestServer(port, dir, string.Join(' ', [$"\"{path}\"", port.ToString(), .. arguments]), "127.0.0.1");
         await server.StartAgainAsync();
         return server;
     }
@@ -70,7 +83,7 @@ public sealed partial class TestServer : IAsyncDisposable
     public async Task StartAgainAsync()
     {
         if (IsListening(Port)) throw new InvalidOperationException($"Port {Port} is already in use");
-        _process = Process.Start(new ProcessStartInfo("python", "main.py")
+        _process = Process.Start(new ProcessStartInfo("python", _arguments)
         {
             WorkingDirectory = _dir,
             UseShellExecute = false,

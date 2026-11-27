@@ -11,6 +11,7 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="oracle\*.txt" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="servers\*.py" CopyToOutputDirectory="PreserveNewest" />
     <Using Include="Xunit" />
     <ProjectReference Include="..\..\src\OpenSmi.Client\OpenSmi.Client.csproj" />
     <ProjectReference Include="..\..\examples\OpenSmi.Client.Examples\OpenSmi.Client.Examples.csproj" Condition="'$(TargetFramework)' == 'net10.0'" />

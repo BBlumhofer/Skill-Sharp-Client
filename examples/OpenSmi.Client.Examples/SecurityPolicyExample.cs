@@ -20,6 +20,6 @@ public static class SecurityPolicyExample
                 autoAcceptServerCertificate),
         }).ConnectAsync(cancellationToken: cancellationToken);
         foreach (var machine in server.Machines.Values)
-            Console.WriteLine(Print.Json(machine.ToDto()));
+            Console.WriteLine(Print.Json(new { Machine = machine.Name, State = machine.CurrentState }));
     }
 }

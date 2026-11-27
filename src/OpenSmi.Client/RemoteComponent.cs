@@ -7,27 +7,28 @@ namespace OpenSmi.Client;
 public sealed record NotificationEvent(string Message, int Severity, string ErrorCode)
 {
     /// <summary>
-    /// The server sends alerts as <c>"&lt;msg&gt;|||&lt;code&gt;"</c>; the event's own ErrorCode wins over the suffix.
-    /// Returns <c>null</c> for events without a message (Python drops them, too).
+    /// The ErrorCode of an alert event; only without one, a <c>"&lt;msg&gt;|||&lt;code&gt;"</c> suffix of older
+    /// servers is split off. Returns <c>null</c> for events without a message (Python drops them, too).
     /// </summary>
     public static NotificationEvent? Parse(string? message, int severity, string? errorCode)
     {
         if (message == null) return null;
-        var parts = message.Split("|||", 2);
-        return new(parts[0], severity, !string.IsNullOrEmpty(errorCode) ? errorCode : parts.Length > 1 ? parts[1] : "");
+        if (errorCode == null && message.Split("|||", 2) is [var text, var code]) return new(text, severity, code);
+        return new(message, severity, errorCode ?? "");
     }
 }
 
 /// <summary>Port of <c>BaseRemoteComponent</c>: a server-side BaseMachineryItem.</summary>
 public abstract class BaseRemoteComponent : RemoteUaObject
 {
-    private Dictionary<string, RemoteSkill> _skillSet = [], _feasibilityCheckSet = [], _preconditionCheckSet = [];
+    private Dictionary<string, RemoteSkill> _skillSet = [];
+    private Dictionary<string, RemoteSkillCheck> _feasibilityCheckSet = [], _preconditionCheckSet = [];
     private Dictionary<string, RemoteMethod> _methodSet = [];
     private Dictionary<string, RemoteComponent> _components = [];
     private Dictionary<string, RemoteResource> _resources = [];
 
-    private protected BaseRemoteComponent(string name, NodeId nodeId, RemoteServer server, RemoteUaObject? parent,
-        IReadOnlyList<BrowseRule>? browseRules) : base(name, nodeId, server, parent, browseRules)
+    private protected BaseRemoteComponent(string name, string? segment, NodeId nodeId, RemoteServer server, RemoteUaObject? parent,
+        IReadOnlyList<BrowseRule>? browseRules) : base(name, nodeId, server, parent, browseRules, segment)
     {
         Identification = new(server, this);
         Monitoring = new(server, this);
@@ -35,9 +36,12 @@ public abstract class BaseRemoteComponent : RemoteUaObject
         ParameterSet = new(server, this);
     }
 
+    /// <summary>Skills by path segment.</summary>
     public IReadOnlyDictionary<string, RemoteSkill> SkillSet => _skillSet;
-    public IReadOnlyDictionary<string, RemoteSkill> FeasibilityCheckSet => _feasibilityCheckSet;
-    public IReadOnlyDictionary<string, RemoteSkill> PreconditionCheckSet => _preconditionCheckSet;
+    /// <summary>Feasibility checks by the segment of their skill; their paths lie below the skill.</summary>
+    public IReadOnlyDictionary<string, RemoteSkillCheck> FeasibilityCheckSet => _feasibilityCheckSet;
+    /// <summary>Precondition checks by the segment of their skill; their paths lie below the skill.</summary>
+    public IReadOnlyDictionary<string, RemoteSkillCheck> PreconditionCheckSet => _preconditionCheckSet;
     public IReadOnlyDictionary<string, RemoteMethod> MethodSet => _methodSet;
     public IReadOnlyDictionary<string, RemoteComponent> Components => _components;
     public IReadOnlyDictionary<string, RemoteResource> Resources => _resources;
@@ -82,11 +86,11 @@ public abstract class BaseRemoteComponent : RemoteUaObject
                 "Monitoring" when features.HasFlag(BrowseFeature.Monitoring) => () => Monitoring.InitAsync(id, ct),
                 "ParameterSet" when features.HasFlag(BrowseFeature.ParameterSet) => () => ParameterSet.InitAsync(id, ct),
                 "Components" when features.HasFlag(BrowseFeature.Components) => async () =>
-                    _components = await BrowseFolderAsync(id, (n, i) => new RemoteComponent(n, i, Server, this, BrowseRules), ct).ConfigureAwait(false),
+                    _components = await BrowseFolderAsync(id, (n, s, i) => new RemoteComponent(n, s, i, Server, this, BrowseRules), ct).ConfigureAwait(false),
                 "Resources" when features.HasFlag(BrowseFeature.Resources) => async () =>
-                    _resources = await BrowseFolderAsync(id, (n, i) => new RemoteResource(n, i, Server, this, BrowseRules), ct).ConfigureAwait(false),
+                    _resources = await BrowseFolderAsync(id, (n, s, i) => new RemoteResource(n, s, i, Server, this, BrowseRules), ct).ConfigureAwait(false),
                 "MethodSet" when features.HasFlag(BrowseFeature.MethodSet) => async () =>
-                    _methodSet = await BrowseFolderAsync(id, (n, i) => new RemoteMethod(n, i, Server, this, BrowseRules), ct).ConfigureAwait(false),
+                    _methodSet = await BrowseFolderAsync(id, (n, s, i) => new RemoteMethod(n, s, i, Server, this, BrowseRules), ct).ConfigureAwait(false),
                 "MachineryBuildingBlocks" => () => BrowseBuildingBlocksAsync(id, features, ct),
                 "Lock" or "SkillSet" or "Identification" or "Attributes" or "Monitoring" or "ParameterSet"
                     or "Components" or "Resources" or "MethodSet" => null,
@@ -107,20 +111,13 @@ public abstract class BaseRemoteComponent : RemoteUaObject
         return null;
     }
 
-    /// <summary>Hook for machine-only building blocks (Users).</summary>
-    private protected virtual Task BrowseBuildingBlockAsync(string name, NodeId nodeId, BrowseFeature features, CancellationToken ct) =>
-        Task.CompletedTask;
-
     private async Task BrowseBuildingBlocksAsync(NodeId nodeId, BrowseFeature features, CancellationToken ct)
     {
         foreach (var child in await UaUtil.BrowseChildrenAsync(Session, nodeId, ct).ConfigureAwait(false))
         {
             var id = UaUtil.ToNodeId(Session, child.NodeId);
-            if (child.BrowseName.Name != "MachineryItemState")
-            {
-                await BrowseBuildingBlockAsync(child.BrowseName.Name, id, features, ct).ConfigureAwait(false);
-                continue;
-            }
+            if (child.BrowseName.Name != "MachineryItemState") continue; // Users belong to the server
+
             var state = (await UaUtil.BrowseChildrenAsync(Session, id, ct).ConfigureAwait(false)).Child("CurrentState");
             if (state == null) continue;
             _currentStateNode = UaUtil.ToNodeId(Session, state.NodeId);
@@ -136,39 +133,52 @@ public abstract class BaseRemoteComponent : RemoteUaObject
         LockOrNull = remoteLock;
     }
 
-    private async Task<Dictionary<string, T>> BrowseFolderAsync<T>(NodeId folder, Func<string, NodeId, T> create, CancellationToken ct)
+    /// <summary>Objects of a folder (Components, Resources, MethodSet), keyed by their unique segment.</summary>
+    private async Task<Dictionary<string, T>> BrowseFolderAsync<T>(NodeId folder, Func<string, string, NodeId, T> create, CancellationToken ct)
         where T : RemoteUaObject
     {
-        var children = (await UaUtil.BrowseChildrenAsync(Session, folder, ct).ConfigureAwait(false))
-            .Where(c => c.NodeClass == NodeClass.Object)
-            .Select(c => create(c.BrowseName.Name, UaUtil.ToNodeId(Session, c.NodeId))).ToList();
+        var refs = await UaUtil.BrowseChildrenAsync(Session, folder, ct).ConfigureAwait(false);
+        var segments = UniqueSegments(refs);
+        var children = refs.Where(c => c.NodeClass == NodeClass.Object)
+            .Select(c => UaUtil.ToNodeId(Session, c.NodeId)).Distinct()
+            .Select(id => create(refs.First(r => UaUtil.ToNodeId(Session, r.NodeId) == id).BrowseName.Name ?? "", segments[id], id)).ToList();
         var ok = await InitChildrenAsync(children, ct).ConfigureAwait(false);
         await Task.WhenAll(ok.Select(c => c.ReadUaTypeAsync(ct))).ConfigureAwait(false);
-        return ok.ToDictionary(c => c.Name);
+        return ok.ToDictionary(c => c.Segment);
     }
 
+    /// <summary>
+    /// A skill is the <c>SkillExecution</c> of a skill object; its checks lie below it (<c>.../SkillSet/Pick/FeasibilityCheck</c>).
+    /// A skill object without SkillExecution is skipped.
+    /// </summary>
     private async Task BrowseSkillSetAsync(NodeId skillSet, CancellationToken ct)
     {
         var skills = await UaUtil.BrowseChildrenAsync(Session, skillSet, ct).ConfigureAwait(false);
+        var segments = UniqueSegments(skills);
         var skillIds = skills.Select(s => UaUtil.ToNodeId(Session, s.NodeId)).ToList();
         var elements = await UaUtil.BrowseChildrenAsync(Session, skillIds, ct).ConfigureAwait(false);
         var created = new List<(string Kind, RemoteSkill Skill)>();
         for (var i = 0; i < skills.Count; i++)
         {
-            foreach (var element in elements[i])
+            NodeId? Element(string name) => elements[i].Child(name) is { } c ? UaUtil.ToNodeId(Session, c.NodeId) : null;
+            if (Element("SkillExecution") is not { } execution)
             {
-                if (element.BrowseName.Name is not ("SkillExecution" or "FeasibilityCheck" or "PreconditionCheck")) continue;
-                created.Add((element.BrowseName.Name, new RemoteSkill(skills[i].BrowseName.Name,
-                    UaUtil.ToNodeId(Session, element.NodeId), skillIds[i], Server, this, BrowseRules)));
+                Logger.LogWarning("Skill {Name} without SkillExecution, skipped ({NodeId})", skills[i].BrowseName.Name, skillIds[i]);
+                continue;
             }
+            // the skill first: its checks' paths lie below it, and objects register top-down
+            var skill = new RemoteSkill(skills[i].BrowseName.Name ?? "", segments[skillIds[i]], execution, skillIds[i], Server, this, BrowseRules);
+            created.Add(("SkillExecution", skill));
+            foreach (var kind in new[] { "FeasibilityCheck", "PreconditionCheck" })
+                if (Element(kind) is { } check)
+                    created.Add((kind, new RemoteSkillCheck(skill, kind, check, skillIds[i], Server, this, BrowseRules)));
         }
         var ok = await InitChildrenAsync(created.Select(c => c.Skill).ToList(), ct).ConfigureAwait(false);
         await Task.WhenAll(ok.Select(s => s.ReadUaTypeAsync(ct))).ConfigureAwait(false);
-        Dictionary<string, RemoteSkill> Of(string kind) =>
-            created.Where(c => c.Kind == kind && ok.Contains(c.Skill)).ToDictionary(c => c.Skill.Name, c => c.Skill);
-        _skillSet = Of("SkillExecution");
-        _feasibilityCheckSet = Of("FeasibilityCheck");
-        _preconditionCheckSet = Of("PreconditionCheck");
+        IEnumerable<RemoteSkill> Of(string kind) => created.Where(c => c.Kind == kind && ok.Contains(c.Skill)).Select(c => c.Skill);
+        _skillSet = Of("SkillExecution").ToDictionary(s => s.Segment);
+        _feasibilityCheckSet = Of("FeasibilityCheck").Cast<RemoteSkillCheck>().ToDictionary(c => c.Skill.Segment);
+        _preconditionCheckSet = Of("PreconditionCheck").Cast<RemoteSkillCheck>().ToDictionary(c => c.Skill.Segment);
     }
 
     private Task OnCurrentStateAsync(DataValue dv)
@@ -183,7 +193,7 @@ public abstract class BaseRemoteComponent : RemoteUaObject
     {
         var message = fields.EventFields[0].Value is LocalizedText lt ? lt.Text : fields.EventFields[0].Value as string;
         var severity = Convert.ToInt32(fields.EventFields[1].Value ?? 0);
-        var notification = NotificationEvent.Parse(message, severity, fields.EventFields[3].Value as string);
+        var notification = NotificationEvent.Parse(message, severity, fields.EventFields[2].Value as string);
         if (notification == null)
         {
             Logger.LogWarning("Dropping event without message on {Path}", Path);
@@ -202,20 +212,22 @@ public abstract class BaseRemoteComponent : RemoteUaObject
 
 public sealed class RemoteComponent : BaseRemoteComponent
 {
-    internal RemoteComponent(string name, NodeId nodeId, RemoteServer server, RemoteUaObject? parent, IReadOnlyList<BrowseRule>? browseRules)
-        : base(name, nodeId, server, parent, browseRules) { }
+    internal RemoteComponent(string name, string? segment, NodeId nodeId, RemoteServer server, RemoteUaObject? parent, IReadOnlyList<BrowseRule>? browseRules)
+        : base(name, segment, nodeId, server, parent, browseRules) { }
+
+    private protected override string Folder => "Components";
 
     /// <summary>Optional for components.</summary>
     public RemoteLock? Lock => LockOrNull;
 
     /// <summary>
     /// Direct node-id mode: build a component from a known NodeId, e.g. after connecting with empty
-    /// <see cref="RemoteServerOptions.BrowseRules"/>. With <paramref name="parent"/> null the path is <c>/name</c>.
+    /// <see cref="RemoteServerOptions.BrowseRules"/>. With <paramref name="parent"/> null the path is <c>/Components/name</c>.
     /// </summary>
     public static async Task<RemoteComponent> CreateAsync(RemoteServer server, string name, NodeId nodeId,
         RemoteUaObject? parent = null, IReadOnlyList<BrowseRule>? browseRules = null, CancellationToken cancellationToken = default)
     {
-        var component = new RemoteComponent(name, nodeId, server, parent, browseRules);
+        var component = new RemoteComponent(name, null, nodeId, server, parent, browseRules);
         await component.ReadUaTypeAsync(cancellationToken).ConfigureAwait(false);
         await component.InitAsync(cancellationToken).ConfigureAwait(false);
         return component;
@@ -224,27 +236,17 @@ public sealed class RemoteComponent : BaseRemoteComponent
 
 public sealed class RemoteResource : BaseRemoteComponent
 {
-    internal RemoteResource(string name, NodeId nodeId, RemoteServer server, RemoteUaObject parent, IReadOnlyList<BrowseRule>? browseRules)
-        : base(name, nodeId, server, parent, browseRules) { }
+    internal RemoteResource(string name, string segment, NodeId nodeId, RemoteServer server, RemoteUaObject parent, IReadOnlyList<BrowseRule>? browseRules)
+        : base(name, segment, nodeId, server, parent, browseRules) { }
+
+    private protected override string Folder => "Resources";
 }
 
 public sealed class RemoteMachine : BaseRemoteComponent
 {
-    private List<RemoteUser> _users = [];
-
-    internal RemoteMachine(string name, NodeId nodeId, RemoteServer server, IReadOnlyList<BrowseRule>? browseRules)
-        : base(name, nodeId, server, null, browseRules) { }
+    internal RemoteMachine(string name, string segment, NodeId nodeId, RemoteServer server, IReadOnlyList<BrowseRule>? browseRules)
+        : base(name, segment, nodeId, server, null, browseRules) { }
 
     /// <summary>Mandatory for machines; throws if the Lock feature was not browsed.</summary>
     public RemoteLock Lock => LockOrNull ?? throw new InvalidOperationException($"{Path} has no browsed Lock (BrowseFeature.Lock)");
-
-    public IReadOnlyList<RemoteUser> Users => _users;
-
-    private protected override async Task BrowseBuildingBlockAsync(string name, NodeId nodeId, BrowseFeature features, CancellationToken ct)
-    {
-        if (name != "Users" || !features.HasFlag(BrowseFeature.Users)) return;
-        var users = (await UaUtil.BrowseChildrenAsync(Session, nodeId, ct).ConfigureAwait(false))
-            .Select(u => new RemoteUser(u.BrowseName.Name, UaUtil.ToNodeId(Session, u.NodeId), Server, this)).ToList();
-        _users = await InitChildrenAsync(users, ct).ConfigureAwait(false);
-    }
 }

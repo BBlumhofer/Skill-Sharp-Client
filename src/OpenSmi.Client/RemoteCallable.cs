@@ -8,8 +8,8 @@ public abstract class RemoteCallable : RemoteUaObject
 {
     private readonly List<NodeId> _dependsOn = [], _dependencyOf = [];
 
-    private protected RemoteCallable(string name, NodeId nodeId, RemoteServer server, BaseRemoteComponent parent,
-        IReadOnlyList<BrowseRule>? browseRules) : base(name, nodeId, server, parent, browseRules)
+    private protected RemoteCallable(string name, string segment, NodeId nodeId, RemoteServer server, BaseRemoteComponent parent,
+        IReadOnlyList<BrowseRule>? browseRules) : base(name, nodeId, server, parent, browseRules, segment)
     {
         ParameterSet = new(server, this);
         Monitoring = new(server, this);
@@ -66,8 +66,10 @@ public sealed class RemoteMethod : RemoteCallable
 {
     private NodeId? _call;
 
-    internal RemoteMethod(string name, NodeId nodeId, RemoteServer server, BaseRemoteComponent parent, IReadOnlyList<BrowseRule>? browseRules)
-        : base(name, nodeId, server, parent, browseRules) { }
+    internal RemoteMethod(string name, string segment, NodeId nodeId, RemoteServer server, BaseRemoteComponent parent, IReadOnlyList<BrowseRule>? browseRules)
+        : base(name, segment, nodeId, server, parent, browseRules) { }
+
+    private protected override string Folder => "MethodSet";
 
     /// <summary>
     /// Calls <c>Call</c> without input arguments (write <see cref="RemoteCallable.ParameterSet"/> first) and returns
@@ -89,9 +91,9 @@ public sealed class RemoteMethod : RemoteCallable
 
 /// <summary>
 /// Port of <c>client/remote_skill.py</c>. <see cref="RemoteUaObject.NodeId"/> is the <c>SkillExecution</c>
-/// (or FeasibilityCheck/PreconditionCheck) node; <see cref="RemoteUaObject.Name"/> is the skill object's name.
+/// node; <see cref="RemoteUaObject.Name"/> is the skill object's name.
 /// </summary>
-public sealed class RemoteSkill : RemoteCallable
+public class RemoteSkill : RemoteCallable
 {
     private readonly NodeId _skillObject;
     private readonly object _stateGate = new(); // not System.Threading.Lock: net8.0 has none
@@ -99,11 +101,13 @@ public sealed class RemoteSkill : RemoteCallable
     private int _haltCount;
     private NodeId? _stateMachine, _currentState, _start, _halt, _reset, _suspend;
 
-    internal RemoteSkill(string name, NodeId nodeId, NodeId skillObject, RemoteServer server, BaseRemoteComponent parent,
-        IReadOnlyList<BrowseRule>? browseRules) : base(name, nodeId, server, parent, browseRules)
+    internal RemoteSkill(string name, string segment, NodeId nodeId, NodeId skillObject, RemoteServer server, BaseRemoteComponent parent,
+        IReadOnlyList<BrowseRule>? browseRules) : base(name, segment, nodeId, server, parent, browseRules)
     {
         _skillObject = skillObject;
     }
+
+    private protected override string? Folder => "SkillSet";
 
     /// <summary>Cached, updated by subscription; initially Halted.</summary>
     public SkillState CurrentState { get; private set; } = SkillState.Halted;
@@ -227,4 +231,20 @@ public sealed class RemoteSkill : RemoteCallable
         _stateWatchers.Publish(state);
         return StateChanged.RaiseAsync(this, new(state), Logger);
     }
+}
+
+/// <summary>
+/// A feasibility or precondition check of a skill: a skill-like object of the component whose path lies below its
+/// skill, e.g. <c>/M1/SkillSet/Pick/FeasibilityCheck</c>. Name and segment are the check's browse name.
+/// </summary>
+public sealed class RemoteSkillCheck(RemoteSkill skill, string name, NodeId nodeId, NodeId skillObject, RemoteServer server,
+    BaseRemoteComponent parent, IReadOnlyList<BrowseRule>? browseRules)
+    : RemoteSkill(name, name, nodeId, skillObject, server, parent, browseRules)
+{
+    private readonly RemoteSkill _skill = skill; // initialized before the base constructor registers the path
+
+    /// <summary>The skill this check belongs to.</summary>
+    public RemoteSkill Skill => _skill;
+
+    private protected override ObjectPath BasePath => _skill.Path;
 }

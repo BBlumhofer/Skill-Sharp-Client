@@ -37,7 +37,7 @@ public static class ColdStartExample
         // Step 3: the machine should be ready now, use it :)
         var skill = machine.SkillSet["DummySkill"];
         Console.WriteLine($"parameters before: {Print.Values(await skill.ParameterSet.ReadAllAsync(cancellationToken))}");
-        await skill.ParameterSet.WriteAllAsync(new Dictionary<string, object?> { ["x"] = 5, ["y"] = 42 }, cancellationToken);
+        await skill.ParameterSet.WriteAllAsync(new Dictionary<string, object?> { ["X"] = 5, ["Y"] = 42 }, cancellationToken);
         await skill.StartAsync(StartWait.Completion, cancellationToken: cancellationToken);
         Console.WriteLine($"results: {Print.Values(await skill.FinalResultData.ReadAllAsync(cancellationToken))}");
         await skill.ResetAsync(wait: true, cancellationToken: cancellationToken); // reset after getting the results!

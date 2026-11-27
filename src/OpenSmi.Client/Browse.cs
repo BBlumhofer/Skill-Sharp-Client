@@ -1,34 +1,49 @@
 namespace OpenSmi.Client;
 
-/// <summary>Port of <c>client/browse.py</c>. Paths are POSIX strings such as <c>/Machine/Component</c>.</summary>
-public sealed record BrowseRule(Func<string, bool> Match, BrowseFeature Features)
+/// <summary>Port of <c>client/browse.py</c>: which features to browse for an object, decided by its path.</summary>
+public sealed record BrowseRule(Func<ObjectPath, bool> Match, BrowseFeature Features)
 {
     public static BrowseRule Default { get; } = new(OpenSmi.Client.Match.All, BrowseFeature.All);
 }
 
 public static class BrowseRules
 {
-    public static BrowseRule When(Func<string, bool> match, params BrowseFeature[] features) =>
+    public static BrowseRule When(Func<ObjectPath, bool> match, params BrowseFeature[] features) =>
         new(match, features.Aggregate(BrowseFeature.None, (a, f) => a | f));
 
-    public static BrowseFeature Evaluate(IEnumerable<BrowseRule> rules, string path) =>
+    /// <summary>All matching rules contribute their features.</summary>
+    public static BrowseFeature Evaluate(IEnumerable<BrowseRule> rules, ObjectPath path) =>
         rules.Where(r => r.Match(path)).Aggregate(BrowseFeature.None, (a, r) => a | r.Features);
 }
 
+/// <summary>Matchers for <see cref="BrowseRule"/>. String paths and patterns are checked when the matcher is made.</summary>
 public static class Match
 {
-    public static bool All(string path) => true;
+    public static bool All(ObjectPath path) => true;
 
-    public static Func<string, bool> Name(string name) => p => p[(p.LastIndexOf('/') + 1)..] == name;
+    /// <summary>Matches the last segment.</summary>
+    public static Func<ObjectPath, bool> Name(string name) => p => p.Name == name;
 
-    public static Func<string, bool> Path(string path) => p => p == path;
+    /// <summary>Matches an exact path, e.g. <c>"/M1/Components/Gripper"</c>.</summary>
+    public static Func<ObjectPath, bool> Path(string path) => Path(ObjectPath.Parse(path));
 
-    public static Func<string, bool> PathPrefix(string prefix) =>
-        p => p == prefix || p.StartsWith(prefix.TrimEnd('/') + "/", StringComparison.Ordinal);
+    public static Func<ObjectPath, bool> Path(ObjectPath path) => p => p == path;
 
-    public static Func<string, bool> Any(params Func<string, bool>[] matchers) => p => matchers.Any(m => m(p));
+    /// <summary>Matches a path and all of its descendants.</summary>
+    public static Func<ObjectPath, bool> PathPrefix(string prefix) => PathPrefix(ObjectPath.Parse(prefix));
 
-    public static Func<string, bool> AllOf(params Func<string, bool>[] matchers) => p => matchers.All(m => m(p));
+    public static Func<ObjectPath, bool> PathPrefix(ObjectPath prefix) => p => p.IsRelativeTo(prefix);
 
-    public static Func<string, bool> Not(Func<string, bool> matcher) => p => !matcher(p);
+    /// <summary>Matches paths by glob pattern (see <see cref="ObjectPath.Match"/>), e.g. <c>"/M1/**/SkillSet/*"</c>.</summary>
+    public static Func<ObjectPath, bool> Glob(string pattern)
+    {
+        var glob = new ObjectPath.Glob(pattern); // check the pattern now, not on the first browsed object
+        return glob.IsMatch;
+    }
+
+    public static Func<ObjectPath, bool> Any(params Func<ObjectPath, bool>[] matchers) => p => matchers.Any(m => m(p));
+
+    public static Func<ObjectPath, bool> AllOf(params Func<ObjectPath, bool>[] matchers) => p => matchers.All(m => m(p));
+
+    public static Func<ObjectPath, bool> Not(Func<ObjectPath, bool> matcher) => p => !matcher(p);
 }

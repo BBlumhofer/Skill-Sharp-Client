@@ -26,13 +26,6 @@ public class ExamplesTests(ExamplesServer fixture) : IClassFixture<ExamplesServe
     }
 
     [Fact]
-    public async Task Dto_prints_machine_as_json()
-    {
-        var output = await OutputOfAsync(() => DtoExample.RunAsync(Url));
-        Assert.Contains("\"Path\": \"/DummyMachine\"", output);
-    }
-
-    [Fact]
     public async Task Cold_start_brings_up_startup_skill_and_runs_dummy_skill()
     {
         var output = await OutputOfAsync(() => ColdStartExample.RunAsync(Url));
@@ -44,6 +37,7 @@ public class ExamplesTests(ExamplesServer fixture) : IClassFixture<ExamplesServe
     public async Task Quick_start_runs_a_skill()
     {
         await ColdStartExample.RunAsync(Url); // DummySkill needs the StartupSkill running
+        await ServerFixture.SettleAsync();
         var output = await OutputOfAsync(() => QuickStartExample.RunAsync(Url, "DummyMachine", "DummySkill"));
         Assert.Contains("results:", output);
     }
@@ -67,15 +61,16 @@ public class ExamplesTests(ExamplesServer fixture) : IClassFixture<ExamplesServe
     public async Task Browse_rules_browse_components_only_where_they_match()
     {
         var output = await OutputOfAsync(() => BrowseRulesExample.RunAsync(Url));
-        Assert.Contains("\"Path\": \"/DummyMachine/DummyComponent\"", output);
-        Assert.DoesNotContain("\"Path\": \"/DummyMachine/Lock\"", output);
+        Assert.Contains("\"Machine\": \"DummyMachine\"", output);
+        Assert.Contains("\"Components\": [\n    \"DummyComponent\"\n  ]", output.ReplaceLineEndings("\n"));
+        Assert.Contains("\"DummySkill\"", output);
     }
 
     [Fact]
     public async Task Direct_component_is_built_from_its_node_id()
     {
         var output = await OutputOfAsync(() => DirectComponentExample.RunAsync(Url));
-        Assert.Contains("\"Path\": \"/DummyComponent\"", output);
+        Assert.Contains("\"Path\": \"/Components/DummyComponent\"", output); // no parent: folder below the root
         Assert.Contains("DummySkillInComponent", output);
     }
 
@@ -98,7 +93,7 @@ public class ExamplesTests(ExamplesServer fixture) : IClassFixture<ExamplesServe
     public async Task Subscription_variable_prints_value_changes()
     {
         var output = await OutputOfAsync(() => SubscriptionVariableExample.RunAsync(Url, TimeSpan.FromSeconds(2)));
-        Assert.Contains("new value: /DummyMachine/DummyComponent/Monitoring/", output);
+        Assert.Contains("new value: /DummyMachine/Components/DummyComponent/Monitoring/", output);
     }
 
     [Fact]
@@ -124,6 +119,6 @@ public class SecurityPolicyExampleTests(EncryptedExamplesServer fixture) : IClas
         var store = Directory.CreateTempSubdirectory("opensmi-pki-").FullName;
         var output = await ExamplesTests.OutputOfAsync(() =>
             SecurityPolicyExample.RunAsync(fixture.Server.Url, store, autoAcceptServerCertificate: true));
-        Assert.Contains("\"Path\": \"/DummyMachine\"", output);
+        Assert.Contains("\"Machine\": \"DummyMachine\"", output);
     }
 }

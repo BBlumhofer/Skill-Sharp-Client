@@ -22,7 +22,7 @@ public static class QuickStartExample
             await skill.ResetAsync(wait: true, cancellationToken: cancellationToken);
 
         // bulk write the parameters
-        await skill.ParameterSet.WriteAllAsync(new Dictionary<string, object?> { ["x"] = 5, ["y"] = 10 }, cancellationToken);
+        await skill.ParameterSet.WriteAllAsync(new Dictionary<string, object?> { ["X"] = 5, ["Y"] = 10 }, cancellationToken);
 
         // start the skill and wait for completion
         await skill.StartAsync(StartWait.Completion, cancellationToken: cancellationToken);

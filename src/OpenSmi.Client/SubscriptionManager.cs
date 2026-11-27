@@ -28,8 +28,8 @@ internal sealed class SubscriptionManager : IAsyncDisposable
     private readonly Task _heartbeat;
     private long _lastNotification = Environment.TickCount64;
 
-    // Select clauses of every event item; NotificationEvent parsing relies on this order.
-    internal static readonly string[] EventFields = ["Message", "Severity", "SourceNode", "ErrorCode"];
+    internal const string MachineSetNamespace = "http://smartfactory.de/UA/MachineSet";
+    private const uint AlertTypeId = 1001;
 
     private SubscriptionManager(Subscription subscription, RemoteServer server, TimeSpan staleAfter)
     {
@@ -134,8 +134,16 @@ internal sealed class SubscriptionManager : IAsyncDisposable
 
     private MonitoredItem EventItem(NodeId sourceNode)
     {
+        // Select clauses: Message, Severity (BaseEventType), ErrorCode (MachineSet AlertType); BaseRemoteComponent
+        // relies on this order. Without a where clause every event type arrives, alerts and plain messages.
         var filter = new EventFilter();
-        foreach (var field in EventFields) filter.AddSelectClause(ObjectTypeIds.BaseEventType, field);
+        filter.AddSelectClause(ObjectTypeIds.BaseEventType, BrowseNames.Message);
+        filter.AddSelectClause(ObjectTypeIds.BaseEventType, BrowseNames.Severity);
+        var machineSet = _server.RequireSession().NamespaceUris.GetIndex(MachineSetNamespace);
+        if (machineSet >= 0)
+            filter.AddSelectClause(new NodeId(AlertTypeId, (ushort)machineSet), new QualifiedName("ErrorCode", (ushort)machineSet));
+        else
+            filter.AddSelectClause(ObjectTypeIds.BaseEventType, "ErrorCode"); // keeps the field count; always null
         var item = new MonitoredItem(_subscription.DefaultItem)
         {
             StartNodeId = sourceNode,
@@ -146,10 +154,10 @@ internal sealed class SubscriptionManager : IAsyncDisposable
         };
         item.Notification += (_, e) =>
         {
-            // Route by SourceNode like Python: some servers emit everything from the Server object.
-            if (e.NotificationValue is EventFieldList f && f.EventFields.Count == EventFields.Length
-                && f.EventFields[2].Value is NodeId source)
-                Enqueue(_eventHandlers, source, f);
+            // Route by monitored item like Python (core 0.7): SourceNode is the object the event is about, e.g. a
+            // method below the machine, not the subscribed Notification node.
+            if (e.NotificationValue is EventFieldList f && f.EventFields.Count == 3)
+                Enqueue(_eventHandlers, sourceNode, f);
         };
         return item;
     }
