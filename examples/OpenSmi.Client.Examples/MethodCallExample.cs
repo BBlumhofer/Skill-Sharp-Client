@@ -16,7 +16,7 @@ public static class MethodCallExample
         // Step 2: profit!
         var method = machine.MethodSet["DummyMethod"];
         Console.WriteLine($"parameters before: {Print.Values(await method.ParameterSet.ReadAllAsync(cancellationToken))}");
-        await method.ParameterSet.WriteAllAsync(new Dictionary<string, object?> { ["a"] = 5, ["b"] = 42 }, cancellationToken);
+        await method.ParameterSet.WriteAllAsync(new Dictionary<string, object?> { ["A"] = 5, ["B"] = 42 }, cancellationToken);
         await method.CallAsync(cancellationToken);
         Console.WriteLine($"results: {Print.Values(await method.FinalResultData.ReadAllAsync(cancellationToken))}");
     }

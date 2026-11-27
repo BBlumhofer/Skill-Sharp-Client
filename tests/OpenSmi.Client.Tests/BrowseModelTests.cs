@@ -15,7 +15,8 @@ public class BrowseModelTests
         var component = machine.Components["DummyComponent"];
         Assert.Empty(server.InitExceptions);
         Assert.Empty(machine.InitExceptions);
-        Assert.Equal("/DummyMachine/DummyComponent/NestedDummyComponent", component.Components["NestedDummyComponent"].Path);
+        Assert.Equal(ObjectPath.Parse("/DummyMachine/Components/DummyComponent/Components/NestedDummyComponent"),
+            component.Components["NestedDummyComponent"].Path);
         Assert.Equal(["DummySkillInComponent"], component.SkillSet.Keys);
         Assert.Equal(["DummyMethod"], component.MethodSet.Keys);
         // Python fills its dict in completion order, so only the set is comparable.
@@ -32,7 +33,7 @@ public class BrowseModelTests
         var parameters = server.Machines["DummyMachine"].ParameterSet;
 
         var f = parameters["DummyFloatParameter"];
-        Assert.Equal("/DummyMachine/ParameterSet/DummyFloatParameter", f.Path);
+        Assert.Equal(ObjectPath.Parse("/DummyMachine/ParameterSet/DummyFloatParameter"), f.Path);
         Assert.Equal("ns=1;s=DummyMachine.ParameterSet.DummyFloatParameter", f.NodeId.ToString());
         Assert.Equal("BaseDataVariableType", f.UaType);
         Assert.Equal("Double", f.UaDataType);
@@ -46,9 +47,18 @@ public class BrowseModelTests
 
         var skill = server.Machines["DummyMachine"].SkillSet["StartupSkill"];
         Assert.Equal("ns=1;s=DummyMachine.SkillSet.StartupSkill.SkillExecution", skill.NodeId.ToString());
-        Assert.Equal("/DummyMachine/StartupSkill/FinalResultData/SuccessfulExecutionsCount",
+        Assert.Equal(ObjectPath.Parse("/DummyMachine/SkillSet/StartupSkill/FinalResultData/SuccessfulExecutionsCount"),
             skill.FinalResultData["SuccessfulExecutionsCount"].Path);
         Assert.False(skill.FinalResultData["SuccessfulExecutionsCount"].IsWritable);
+    }
+
+    [Fact]
+    public async Task Every_object_has_the_path_and_aliases_of_the_python_client()
+    {
+        await using var server = await ServerFixture.ConnectAsync();
+        var expected = File.ReadAllLines(Path.Combine(AppContext.BaseDirectory, "oracle", "dummy-objects.txt"));
+
+        Assert.Equal(expected, server.Find("/**").Select(ObjectModelTests.Describe));
     }
 
     [Fact]
@@ -78,18 +88,30 @@ public class BrowseModelTests
         var component = await RemoteComponent.CreateAsync(server, "DummyComponent",
             NodeId.Parse("ns=1;s=DummyMachine.Components.DummyComponent"));
 
-        Assert.Equal("/DummyComponent", component.Path);
+        Assert.Equal(ObjectPath.Parse("/Components/DummyComponent"), component.Path); // no parent: the folder below the root
         Assert.Contains("DummySkillInComponent", component.SkillSet.Keys);
         Assert.Same(component, server.GetUaObject(component.NodeId));
     }
 
     [Fact]
-    public async Task Component_state_is_read_and_cached()
+    public async Task States_and_values_are_known_with_status_and_timestamps_after_connect()
     {
         await using var server = await ServerFixture.ConnectAsync();
         var machine = server.Machines["DummyMachine"];
+
         var state = await machine.ReadCurrentStateAsync();
-        Assert.NotEqual("Unknown", state);
+        Assert.NotNull(state);
         Assert.Equal(state, machine.CurrentState);
+        Assert.Equal(Quality.Good, machine.CurrentStateSample!.Quality);
+        Assert.Null(machine.Resources.Values.First().CurrentStateSample); // resources have no CurrentState node
+
+        var startup = machine.SkillSet["StartupSkill"];
+        Assert.Equal(Quality.Good, startup.CurrentStateSample.Quality); // not waiting for the first notification
+        Assert.Equal(await startup.ReadCurrentStateAsync(), startup.CurrentState);
+
+        var parameter = machine.ParameterSet["DummyFloatParameter"];
+        Assert.Equal(Quality.Good, parameter.Sample.Quality);
+        Assert.NotNull(parameter.Timestamp);
+        Assert.Equal(parameter.Value, (await parameter.ReadSampleAsync()).Value);
     }
 }

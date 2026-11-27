@@ -15,7 +15,7 @@ public class ReconnectTests
     private static Task<object?> NextValueAsync(RemoteVariable variable)
     {
         var next = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
-        variable.ValueChanged += (_, e) => { next.TrySetResult(e.Value.Value); return Task.CompletedTask; };
+        variable.ValueChanged += (_, e) => { next.TrySetResult(e.Value); return Task.CompletedTask; };
         return next.Task.WaitAsync(TimeSpan.FromSeconds(10));
     }
 

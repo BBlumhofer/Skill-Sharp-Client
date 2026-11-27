@@ -1,11 +1,19 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <PackageId>OpenSmi.Client</PackageId>
-    <Description>C# client for Smart Machine Interface (SMI) compliant OPC UA servers, port of opensmi-client.</Description>
+    <!-- 2.0.0 continues the SkillSharp.Client package; namespace and assembly are OpenSmi.Client. -->
+    <PackageId>SkillSharp.Client</PackageId>
+    <Version>2.0.0</Version>
+    <Description>C# client for Smart Machine Interface (SMI) compliant OPC UA servers (namespace OpenSmi.Client), port of the Python opensmi-client. Replaces SkillSharp.Client 1.x.</Description>
+    <PackageTags>OPC UA;OpenSMI;SMI;skills;manufacturing</PackageTags>
+    <RepositoryUrl>https://github.com/BBlumhofer/Skill-Sharp-Client</RepositoryUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="OPCFoundation.NetStandard.Opc.Ua.Client" Version="1.5.377.22" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="OpenSmi.Client.Tests" />

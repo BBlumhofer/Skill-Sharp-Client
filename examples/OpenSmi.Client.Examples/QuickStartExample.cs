@@ -2,7 +2,7 @@ namespace OpenSmi.Client.Examples;
 
 /// <summary>
 /// Port of examples/quick_start.py: lock the machine and run a skill once. The defaults fit the
-/// opensmi-server quick_start example (opc.tcp://localhost:4841/).
+/// opensmi-server quick_start example (opc.tcp://localhost:4841/server).
 /// </summary>
 public static class QuickStartExample
 {
@@ -22,7 +22,7 @@ public static class QuickStartExample
             await skill.ResetAsync(wait: true, cancellationToken: cancellationToken);
 
         // bulk write the parameters
-        await skill.ParameterSet.WriteAllAsync(new Dictionary<string, object?> { ["x"] = 5, ["y"] = 10 }, cancellationToken);
+        await skill.ParameterSet.WriteAllAsync(new Dictionary<string, object?> { ["X"] = 5, ["Y"] = 10 }, cancellationToken);
 
         // start the skill and wait for completion
         await skill.StartAsync(StartWait.Completion, cancellationToken: cancellationToken);

@@ -24,6 +24,12 @@ public static class BrowseRulesExample
             Url = url, Username = "visitor", Password = "visitor", BrowseRules = browseRules,
         }).ConnectAsync(cancellationToken: cancellationToken);
         foreach (var machine in server.Machines.Values)
-            Console.WriteLine(Print.Json(machine.ToDto()));
+            Console.WriteLine(Print.Json(new
+            {
+                Machine = machine.Name,
+                Monitoring = machine.Monitoring.Values.Select(v => v.Name),
+                Components = machine.Components.Keys,
+                Skills = machine.SkillSet.Keys,
+            }));
     }
 }

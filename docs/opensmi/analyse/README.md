@@ -1,11 +1,12 @@
 # Analyse-Grundlagen
 
 Detail-Inventare, auf die sich [SPEC.md](../SPEC.md) und [UMBAUPLAN.md](../UMBAUPLAN.md) stützen
-(erstellt 2026-10-29).
+(erstellt 2026-10-29). Es sind Momentaufnahmen fremden bzw. alten Codes zu den unten genannten
+Commits; sie beschreiben nicht den neuen C#-Client und werden nicht nachgeführt.
 
-- `opensmi-client-inventar.md` [OI] – API, Browse-Logik, Informationsmodell, Skill- und
+- `opensmi-client-inventar.md` [OI]: API, Browse-Logik, Informationsmodell, Skill- und
   Lock-Semantik des Python-Clients.
-- `skill-sharp-client-inventar.md` [SI] – Klassen, Bugs, generische vs. SmartFactory-spezifische
+- `skill-sharp-client-inventar.md` [SI]: Klassen, Bugs, generische vs. SmartFactory-spezifische
   Teile und IMAPRO-Nutzung dieses Repos.
 
 Die `file:line`-Angaben beziehen sich auf diese Stände:

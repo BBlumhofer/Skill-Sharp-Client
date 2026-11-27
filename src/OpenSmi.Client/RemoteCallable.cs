@@ -8,8 +8,8 @@ public abstract class RemoteCallable : RemoteUaObject
 {
     private readonly List<NodeId> _dependsOn = [], _dependencyOf = [];
 
-    private protected RemoteCallable(string name, NodeId nodeId, RemoteServer server, BaseRemoteComponent parent,
-        IReadOnlyList<BrowseRule>? browseRules) : base(name, nodeId, server, parent, browseRules)
+    private protected RemoteCallable(string name, string segment, NodeId nodeId, RemoteServer server, BaseRemoteComponent parent,
+        IReadOnlyList<BrowseRule>? browseRules) : base(name, nodeId, server, parent, browseRules, segment)
     {
         ParameterSet = new(server, this);
         Monitoring = new(server, this);
@@ -44,10 +44,21 @@ public abstract class RemoteCallable : RemoteUaObject
             };
             if (run != null) work.Add(($"{Path}/{name}", run));
         }
+        if (RequirementsOwner is { } owner)
+            work.Add(($"{Path}/Requirements", () => BrowseOwnerRequirementsAsync(owner, ct)));
         await GatherAsync(work).ConfigureAwait(false);
         await Server.Subscriptions.SubscribeDataChangeAsync(
             new RemoteVariableContainer[] { Monitoring, FinalResultData, ParameterSet }.SelectMany(c => c.SubscriptionItems),
             ct).ConfigureAwait(false);
+    }
+
+    /// <summary>A further node whose <c>Requirements</c> belong to this callable (the skill object of a skill).</summary>
+    private protected virtual NodeId? RequirementsOwner => null;
+
+    private async Task BrowseOwnerRequirementsAsync(NodeId owner, CancellationToken ct)
+    {
+        if ((await UaUtil.BrowseChildrenAsync(Session, owner, ct).ConfigureAwait(false)).Child("Requirements") is { } requirements)
+            await BrowseDependenciesAsync(UaUtil.ToNodeId(Session, requirements.NodeId), ct).ConfigureAwait(false);
     }
 
     /// <summary>Handles the type-specific children (Call, StateMachine); null if nothing to do.</summary>
@@ -57,7 +68,13 @@ public abstract class RemoteCallable : RemoteUaObject
     {
         var refs = (await UaUtil.BrowseAsync(Session, [requirements], ReferenceTypeIds.Requires, BrowseDirection.Both, 0, ct)
             .ConfigureAwait(false))[0];
-        foreach (var r in refs) (r.IsForward ? _dependsOn : _dependencyOf).Add(UaUtil.ToNodeId(Session, r.NodeId));
+        lock (_dependsOn)
+            foreach (var r in refs)
+            {
+                var list = r.IsForward ? _dependsOn : _dependencyOf;
+                var id = UaUtil.ToNodeId(Session, r.NodeId);
+                if (!list.Contains(id)) list.Add(id);
+            }
     }
 }
 
@@ -66,8 +83,10 @@ public sealed class RemoteMethod : RemoteCallable
 {
     private NodeId? _call;
 
-    internal RemoteMethod(string name, NodeId nodeId, RemoteServer server, BaseRemoteComponent parent, IReadOnlyList<BrowseRule>? browseRules)
-        : base(name, nodeId, server, parent, browseRules) { }
+    internal RemoteMethod(string name, string segment, NodeId nodeId, RemoteServer server, BaseRemoteComponent parent, IReadOnlyList<BrowseRule>? browseRules)
+        : base(name, segment, nodeId, server, parent, browseRules) { }
+
+    private protected override string Folder => "MethodSet";
 
     /// <summary>
     /// Calls <c>Call</c> without input arguments (write <see cref="RemoteCallable.ParameterSet"/> first) and returns
@@ -89,9 +108,9 @@ public sealed class RemoteMethod : RemoteCallable
 
 /// <summary>
 /// Port of <c>client/remote_skill.py</c>. <see cref="RemoteUaObject.NodeId"/> is the <c>SkillExecution</c>
-/// (or FeasibilityCheck/PreconditionCheck) node; <see cref="RemoteUaObject.Name"/> is the skill object's name.
+/// node; <see cref="RemoteUaObject.Name"/> is the skill object's name.
 /// </summary>
-public sealed class RemoteSkill : RemoteCallable
+public class RemoteSkill : RemoteCallable
 {
     private readonly NodeId _skillObject;
     private readonly object _stateGate = new(); // not System.Threading.Lock: net8.0 has none
@@ -99,14 +118,27 @@ public sealed class RemoteSkill : RemoteCallable
     private int _haltCount;
     private NodeId? _stateMachine, _currentState, _start, _halt, _reset, _suspend;
 
-    internal RemoteSkill(string name, NodeId nodeId, NodeId skillObject, RemoteServer server, BaseRemoteComponent parent,
-        IReadOnlyList<BrowseRule>? browseRules) : base(name, nodeId, server, parent, browseRules)
+    internal RemoteSkill(string name, string segment, NodeId nodeId, NodeId skillObject, RemoteServer server, BaseRemoteComponent parent,
+        IReadOnlyList<BrowseRule>? browseRules) : base(name, segment, nodeId, server, parent, browseRules)
     {
         _skillObject = skillObject;
     }
 
-    /// <summary>Cached, updated by subscription; initially Halted.</summary>
-    public SkillState CurrentState { get; private set; } = SkillState.Halted;
+    private protected override string? Folder => "SkillSet";
+
+    /// <summary>
+    /// opensmi-server 0.3 puts <c>Requirements</c> below the skill object, older servers below SkillExecution;
+    /// both are read (Python reads only SkillExecution).
+    /// </summary>
+    private protected override NodeId? RequirementsOwner => _skillObject;
+
+    /// <summary>
+    /// Cached state, updated by subscription. Halted (the safest assumption) while the server reports no value, e.g.
+    /// with a bad status (see <see cref="CurrentStateSample"/>).
+    /// </summary>
+    public SkillState CurrentState => CurrentStateSample.Value;
+    /// <summary>Cached state with status and timestamps; BadWaitingForInitialData until the server reported one.</summary>
+    public Sample<SkillState> CurrentStateSample { get; private set; } = SampleUpdates.WaitingForInitialData(SkillState.Halted);
     public bool IsSuspendable => _suspend != null;
     /// <summary>From the type of the skill object (FiniteSkillType vs. ContinuousSkillType).</summary>
     public bool IsFinite => UaType.StartsWith("finite", StringComparison.OrdinalIgnoreCase);
@@ -147,7 +179,7 @@ public sealed class RemoteSkill : RemoteCallable
     {
         var dv = (await UaUtil.ReadAsync(Session, [(_currentState!, Opc.Ua.Attributes.Value)], cancellationToken).ConfigureAwait(false))[0];
         OpenSmiStatusException.ThrowIfBad(dv.StatusCode, $"Read of {Path} state");
-        return ParseState(BaseRemoteComponent.StateText(dv.Value));
+        return dv.Value == null ? SkillState.Halted : ParseState(SampleUpdates.StateText(dv.Value));
     }
 
     public override async Task<string> ReadUaTypeAsync(CancellationToken cancellationToken = default)
@@ -159,7 +191,7 @@ public sealed class RemoteSkill : RemoteCallable
     internal static SkillState ParseState(string text) =>
         text.Length == 0 ? SkillState.Halted
         : Enum.TryParse<SkillState>(text, ignoreCase: true, out var s) && Enum.IsDefined(s) && !int.TryParse(text, out _) ? s
-        : throw new OpenSmiProtocolException($"Unknown skill state '{text}'");
+        : throw new OpenSmiUnknownStateException($"Unknown skill state '{text}'");
 
     private protected override Func<Task>? HandleChild(string name, NodeId nodeId, CancellationToken ct) =>
         name == "StateMachine" ? () => BrowseStateMachineAsync(nodeId, ct) : null;
@@ -175,6 +207,10 @@ public sealed class RemoteSkill : RemoteCallable
         _halt = Required("Halt");
         _reset = Required("Reset");
         _suspend = children.Child("Suspend") is { } s ? UaUtil.ToNodeId(Session, s.NodeId) : null;
+        // The state is read before subscribing, so it is known when ConnectAsync returns (Python waits for the
+        // first notification); the subscription's initial value then only confirms it.
+        var initial = (await UaUtil.ReadAsync(Session, [(_currentState, Opc.Ua.Attributes.Value)], ct).ConfigureAwait(false))[0];
+        await OnStateAsync(initial).ConfigureAwait(false);
         await Server.Subscriptions.SubscribeDataChangeAsync([(_currentState, OnStateAsync)], ct).ConfigureAwait(false);
     }
 
@@ -209,22 +245,43 @@ public sealed class RemoteSkill : RemoteCallable
 
     private Task OnStateAsync(DataValue dv)
     {
-        SkillState state;
-        try { state = ParseState(BaseRemoteComponent.StateText(dv.Value)); }
-        catch (OpenSmiProtocolException e)
-        {
-            Logger.LogWarning(e, "Ignoring state update of {Path}", Path);
-            return Task.CompletedTask;
-        }
+        Sample<SkillState> sample;
         lock (_stateGate)
         {
-            if (state == CurrentState) return Task.CompletedTask;
-            CurrentState = state;
-            if (state == SkillState.Halted) _haltCount++;
-            _stateChanged.SetResult();
-            _stateChanged = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            if (SampleUpdates.SkillState(CurrentStateSample, dv) is not var (s, changed, stateChanged))
+            {
+                Logger.LogWarning("Ignoring unknown state {Value} of {Path}", dv.Value, Path);
+                return Task.CompletedTask;
+            }
+            CurrentStateSample = sample = s;
+            if (!changed) return Task.CompletedTask; // e.g. only a new timestamp
+            if (stateChanged)
+            {
+                if (s.Value == SkillState.Halted) _haltCount++;
+                _stateChanged.SetResult();
+                _stateChanged = new(TaskCreationOptions.RunContinuationsAsynchronously);
+                _stateWatchers.Publish(s.Value);
+            }
         }
-        _stateWatchers.Publish(state);
-        return StateChanged.RaiseAsync(this, new(state), Logger);
+        return StateChanged.RaiseAsync(this, new(sample), Logger);
     }
+}
+
+/// <summary>
+/// A feasibility or precondition check of a skill: a skill-like object of the component whose path lies below its
+/// skill, e.g. <c>/M1/SkillSet/Pick/FeasibilityCheck</c>. Name and segment are the check's browse name.
+/// </summary>
+public sealed class RemoteSkillCheck(RemoteSkill skill, string name, NodeId nodeId, NodeId skillObject, RemoteServer server,
+    BaseRemoteComponent parent, IReadOnlyList<BrowseRule>? browseRules)
+    : RemoteSkill(name, name, nodeId, skillObject, server, parent, browseRules)
+{
+    private readonly RemoteSkill _skill = skill; // initialized before the base constructor registers the path
+
+    /// <summary>The skill this check belongs to.</summary>
+    public RemoteSkill Skill => _skill;
+
+    private protected override ObjectPath BasePath => _skill.Path;
+
+    /// <summary>The skill object's Requirements belong to the skill, not to its checks.</summary>
+    private protected override NodeId? RequirementsOwner => null;
 }

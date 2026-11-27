@@ -35,7 +35,10 @@ public sealed class RemoteServer : IAsyncDisposable
     private const string MachineryNamespace = "http://opcfoundation.org/UA/Machinery/";
     private readonly RemoteServerOptions _options;
     private readonly Dictionary<NodeId, WeakReference<RemoteUaObject>> _uaObjects = [];
+    private readonly Dictionary<ObjectPath, WeakReference<RemoteUaObject>> _uaObjectsByPath = [];
+    private readonly List<(ObjectPath Path, NodeId Node, Action<RemoteUaObject> Attach)> _pendingAliases = [];
     private Dictionary<string, RemoteMachine> _machines = [];
+    private Dictionary<string, RemoteUser> _users = [];
     private readonly List<Exception> _initExceptions = [];
     private SessionReconnectHandler? _reconnect;
     private readonly object _disconnectGate = new();
@@ -56,7 +59,12 @@ public sealed class RemoteServer : IAsyncDisposable
 
     public RemoteServerStatus Status { get; private set; }
     public bool IsConnected => Session is { Connected: true };
+    /// <summary>Browsed machines by path segment (their name, unless sanitized or suffixed).</summary>
     public IReadOnlyDictionary<string, RemoteMachine> Machines => _machines;
+    /// <summary>Users of the server by path segment; empty if not browsed (<see cref="BrowseFeature.Users"/> at <c>/</c>).</summary>
+    public IReadOnlyDictionary<string, RemoteUser> Users => _users;
+    /// <summary>Always the root <c>/</c>.</summary>
+    public ObjectPath Path => ObjectPath.Root;
     public string Username => _options.Username;
     public IReadOnlyList<BrowseRule> BrowseRules { get; }
     public IReadOnlyList<Exception> InitExceptions => _initExceptions;
@@ -110,14 +118,21 @@ public sealed class RemoteServer : IAsyncDisposable
                 }
             }
 
-            _uaObjects.Clear();
+            lock (_uaObjects)
+            {
+                _uaObjects.Clear();
+                _uaObjectsByPath.Clear();
+            }
+            lock (_pendingAliases) _pendingAliases.Clear();
             _machines = [];
+            _users = [];
             _initExceptions.Clear();
             Subscriptions = await SubscriptionManager.CreateAsync(this, _options.PublishingInterval, _options.HeartbeatStaleAfter, cancellationToken).ConfigureAwait(false);
             if (BrowseRules.Count > 0)
             {
                 await SetStatusAsync(RemoteServerStatus.Browsing).ConfigureAwait(false);
-                await BrowseMachinesAsync(cancellationToken).ConfigureAwait(false);
+                var machineNodes = await BrowseMachinesAsync(cancellationToken).ConfigureAwait(false);
+                await BrowseUsersAsync(machineNodes, cancellationToken).ConfigureAwait(false);
             }
             await Subscriptions.SubscribeDataChangeAsync(
                 [(VariableIds.Server_ServerStatus_CurrentTime, v => TimeUpdated.RaiseAsync(this, new(v.GetValue(DateTime.MinValue)), Logger))],
@@ -165,14 +180,86 @@ public sealed class RemoteServer : IAsyncDisposable
             return _uaObjects.TryGetValue(nodeId, out var r) && r.TryGetTarget(out var o) ? o : null;
     }
 
+    /// <summary>The object at <paramref name="path"/>: its canonical path or one of its aliases.</summary>
+    /// <exception cref="KeyNotFoundException">No object has this path.</exception>
+    public RemoteUaObject Resolve(ObjectPath path) =>
+        ResolveOptional(path) ?? throw new KeyNotFoundException($"No object at {path}");
+
+    /// <exception cref="ArgumentException"><paramref name="path"/> is no valid path.</exception>
+    public RemoteUaObject Resolve(string path) => Resolve(ObjectPath.Parse(path));
+
+    public RemoteUaObject? ResolveOptional(ObjectPath path)
+    {
+        lock (_uaObjects)
+            return _uaObjectsByPath.TryGetValue(path, out var r) && r.TryGetTarget(out var o) ? o : null;
+    }
+
+    public RemoteUaObject? ResolveOptional(string path) => ResolveOptional(ObjectPath.Parse(path));
+
+    /// <summary>
+    /// All objects whose canonical path matches the glob <paramref name="pattern"/> (see <see cref="ObjectPath.Match"/>),
+    /// in tree order, e.g. <c>Find("/M1/**/SkillSet/*")</c>. An object with aliases is listed once.
+    /// </summary>
+    public IReadOnlyList<RemoteUaObject> Find(string pattern)
+    {
+        var glob = new ObjectPath.Glob(pattern);
+        lock (_uaObjects)
+            return [.. _uaObjectsByPath
+                .Select(kv => (Path: kv.Key, Object: kv.Value.TryGetTarget(out var o) ? o : null))
+                .Where(x => x.Object != null && x.Path == x.Object.Path && glob.IsMatch(x.Path))
+                .OrderBy(x => x.Path).Select(x => x.Object!)];
+    }
+
+    /// <summary>Registers by node and by canonical path; a parent must be registered before its children.</summary>
     internal void Register(RemoteUaObject obj)
     {
         lock (_uaObjects) _uaObjects[obj.NodeId] = new(obj);
+        RegisterPath(obj.Path, obj);
+    }
+
+    /// <summary>A path already taken by another object keeps that object.</summary>
+    internal void RegisterPath(ObjectPath path, RemoteUaObject obj)
+    {
+        lock (_uaObjects)
+        {
+            if (_uaObjectsByPath.TryGetValue(path, out var r) && r.TryGetTarget(out var existing) && !ReferenceEquals(existing, obj))
+            {
+                Logger.LogError("Path {Path} already registered for {Existing}, keeping it", path, existing);
+                return;
+            }
+            _uaObjectsByPath[path] = new(obj);
+        }
+    }
+
+    /// <summary>Remembers that <paramref name="node"/>, owned elsewhere, is also listed at <paramref name="path"/>.</summary>
+    internal void AddPendingAlias(ObjectPath path, NodeId node, Action<RemoteUaObject> attach)
+    {
+        lock (_pendingAliases) _pendingAliases.Add((path, node, attach));
+    }
+
+    /// <summary>Attaches the aliases found while browsing, now that every owner is browsed.</summary>
+    private void AttachAliases()
+    {
+        lock (_pendingAliases)
+        {
+            foreach (var (path, node, attach) in _pendingAliases)
+            {
+                if (GetUaObject(node) is not { } obj)
+                {
+                    Logger.LogWarning("Node {NodeId} listed at {Path}, but its owner wasn't browsed", node, path);
+                    continue;
+                }
+                obj.AddAlias(path);
+                attach(obj);
+            }
+            _pendingAliases.Clear();
+        }
     }
 
     internal ISession RequireSession() => Session ?? throw new InvalidOperationException("Not connected");
 
-    private async Task BrowseMachinesAsync(CancellationToken ct)
+    /// <returns>The nodes of all machines, browsed or not.</returns>
+    private async Task<IReadOnlyList<ReferenceDescription>> BrowseMachinesAsync(CancellationToken ct)
     {
         var session = RequireSession();
         var machineNodes = await UaUtil.BrowseChildrenAsync(session,
@@ -185,13 +272,57 @@ public sealed class RemoteServer : IAsyncDisposable
             machineNodes = await UaUtil.BrowseChildrenAsync(session, UaUtil.ToNodeId(session, folder.NodeId), ct).ConfigureAwait(false);
         }
 
+        var segments = UaUtil.UniqueSegments(session, machineNodes, Logger);
         var machines = machineNodes
-            .Where(r => OpenSmi.Client.BrowseRules.Evaluate(BrowseRules, "/" + r.BrowseName.Name).HasFlag(BrowseFeature.Machines))
-            .Select(r => new RemoteMachine(r.BrowseName.Name, UaUtil.ToNodeId(session, r.NodeId), this, BrowseRules))
+            .Select(r => (Ref: r, Id: UaUtil.ToNodeId(session, r.NodeId)))
+            .Where(m => OpenSmi.Client.BrowseRules.Evaluate(BrowseRules, Path / segments[m.Id]).HasFlag(BrowseFeature.Machines))
+            .Select(m => new RemoteMachine(m.Ref.BrowseName.Name ?? "", segments[m.Id], m.Id, this, BrowseRules))
             .ToList();
         var failures = await UaUtil.InitAllAsync(machines, ct).ConfigureAwait(false);
         _initExceptions.AddRange(failures);
-        _machines = machines.Where(m => m.IsInitialized).ToDictionary(m => m.Name);
+        _machines = machines.Where(m => m.IsInitialized).ToDictionary(m => m.Segment);
+        AttachAliases();
+        return machineNodes;
+    }
+
+    /// <summary>
+    /// Users from the server-wide <c>Objects/Users</c> (BrowseName <c>Users</c> in the MachineSet namespace). Servers
+    /// without it (opensmi-server &lt; 0.3) list them below each machine's <c>MachineryBuildingBlocks/Users</c>; then
+    /// they are read from there, one object per node.
+    /// </summary>
+    private async Task BrowseUsersAsync(IReadOnlyList<ReferenceDescription> machineNodes, CancellationToken ct)
+    {
+        if (!OpenSmi.Client.BrowseRules.Evaluate(BrowseRules, Path).HasFlag(BrowseFeature.Users))
+        {
+            Logger.LogInformation("Skipped browsing users");
+            return;
+        }
+        var session = RequireSession();
+        var machineSet = session.NamespaceUris.GetIndex(SubscriptionManager.MachineSetNamespace);
+        var folders = (await UaUtil.BrowseChildrenAsync(session, ObjectIds.ObjectsFolder, ct).ConfigureAwait(false))
+            .Where(r => r.BrowseName.Name == "Users" && r.BrowseName.NamespaceIndex == machineSet)
+            .Select(r => UaUtil.ToNodeId(session, r.NodeId)).ToList();
+        if (folders.Count == 0)
+        {
+            Logger.LogInformation("Server has no Objects/Users, reading users from the machines");
+            var blocks = (await UaUtil.BrowseChildrenAsync(session, [.. machineNodes.Select(m => UaUtil.ToNodeId(session, m.NodeId))], ct)
+                .ConfigureAwait(false)).Select(c => c.Child("MachineryBuildingBlocks")).OfType<ReferenceDescription>()
+                .Select(b => UaUtil.ToNodeId(session, b.NodeId)).ToList();
+            folders = [.. (await UaUtil.BrowseChildrenAsync(session, blocks, ct).ConfigureAwait(false))
+                .Select(c => c.Child("Users")).OfType<ReferenceDescription>().Select(u => UaUtil.ToNodeId(session, u.NodeId))];
+        }
+
+        var userRefs = (await UaUtil.BrowseChildrenAsync(session, folders, ct).ConfigureAwait(false)).SelectMany(r => r)
+            .DistinctBy(r => UaUtil.ToNodeId(session, r.NodeId)).ToList();
+        var segments = UaUtil.UniqueSegments(session, userRefs, Logger);
+        var users = userRefs.Select(r =>
+        {
+            var id = UaUtil.ToNodeId(session, r.NodeId);
+            return new RemoteUser(r.BrowseName.Name ?? "", segments[id], id, this);
+        }).ToList();
+        _initExceptions.AddRange(await UaUtil.InitAllAsync(users, ct).ConfigureAwait(false));
+        await Task.WhenAll(users.Where(u => u.IsInitialized).Select(u => u.ReadUaTypeAsync(ct))).ConfigureAwait(false);
+        _users = users.Where(u => u.IsInitialized).ToDictionary(u => u.Segment);
     }
 
     private ushort GetNamespaceIndexOrZero(string uri) =>
@@ -233,26 +364,26 @@ public sealed class RemoteServer : IAsyncDisposable
     private static async Task ConfigureSecurityAsync(ApplicationConfiguration config, SecurityOptions security, CancellationToken ct)
     {
         var root = security.CertificateStorePath
-            ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "OpenSmi.Client", "pki");
+            ?? System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "OpenSmi.Client", "pki");
         config.SecurityConfiguration = new SecurityConfiguration
         {
             ApplicationCertificate = new CertificateIdentifier
             {
                 StoreType = CertificateStoreType.Directory,
-                StorePath = Path.Combine(root, "own"),
+                StorePath = System.IO.Path.Combine(root, "own"),
                 SubjectName = "CN=OpenSMI C# Client",
             },
             TrustedPeerCertificates = new CertificateTrustList
             {
                 StoreType = CertificateStoreType.Directory,
-                StorePath = security.TrustedPeerStorePath ?? Path.Combine(root, "trusted"),
+                StorePath = security.TrustedPeerStorePath ?? System.IO.Path.Combine(root, "trusted"),
             },
             TrustedIssuerCertificates = new CertificateTrustList
             {
                 StoreType = CertificateStoreType.Directory,
-                StorePath = Path.Combine(root, "issuers"),
+                StorePath = System.IO.Path.Combine(root, "issuers"),
             },
-            RejectedCertificateStore = new CertificateStoreIdentifier(Path.Combine(root, "rejected")),
+            RejectedCertificateStore = new CertificateStoreIdentifier(System.IO.Path.Combine(root, "rejected")),
             AutoAcceptUntrustedCertificates = security.AutoAcceptServerCertificate,
         };
         await config.ValidateAsync(ApplicationType.Client, ct).ConfigureAwait(false);

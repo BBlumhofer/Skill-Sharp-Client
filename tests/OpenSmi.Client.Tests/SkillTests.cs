@@ -14,13 +14,13 @@ public class SkillStateParsingTests
     [InlineData("Bogus")]
     [InlineData("13")]
     public void Unknown_state_text_is_a_protocol_error(string text) =>
-        Assert.Throws<OpenSmiProtocolException>(() => RemoteSkill.ParseState(text));
+        Assert.Throws<OpenSmiUnknownStateException>(() => RemoteSkill.ParseState(text));
 
     [Fact]
-    public void Notification_error_code_from_event_wins_over_message_suffix()
+    public void Notification_message_suffix_is_only_split_without_error_code()
     {
         Assert.Equal(new NotificationEvent("Fehler", 500, "E42"), NotificationEvent.Parse("Fehler|||E42", 500, null));
-        Assert.Equal(new NotificationEvent("Fehler", 500, "E1"), NotificationEvent.Parse("Fehler|||E42", 500, "E1"));
+        Assert.Equal(new NotificationEvent("Fehler|||E42", 500, "E1"), NotificationEvent.Parse("Fehler|||E42", 500, "E1"));
         Assert.Equal(new NotificationEvent("Info", 100, ""), NotificationEvent.Parse("Info", 100, ""));
         Assert.Null(NotificationEvent.Parse(null, 100, "E1"));
     }
@@ -154,6 +154,26 @@ public class SkillTests
     }
 
     [Fact]
+    public async Task Denied_call_reports_the_alert_error_code_to_the_machine()
+    {
+        // opensmi-server logs "does not own the lock" as alert with ErrorCode E123; its SourceNode is the method.
+        await using var server = await ServerFixture.ConnectAsync();
+        var machine = server.Machines["DummyMachine"];
+        var received = new TaskCompletionSource<NotificationEvent>();
+        machine.NotificationReceived += (_, e) =>
+        {
+            if (e.Notification.Message.Contains("does not own the lock")) received.TrySetResult(e.Notification);
+            return Task.CompletedTask;
+        };
+
+        await Assert.ThrowsAsync<OpenSmiAccessDeniedException>(() => machine.MethodSet["DummyMethod"].CallAsync());
+
+        var notification = await received.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal("E123", notification.ErrorCode);
+        Assert.DoesNotContain("|||", notification.Message);
+    }
+
+    [Fact]
     public async Task Start_in_wrong_state_is_invalid_state()
     {
         await using var server = await ServerFixture.ConnectAsync();
@@ -179,17 +199,21 @@ public class SkillTests
     [Fact]
     public async Task Requirements_give_dependencies()
     {
+        // opensmi-server 0.3 puts Requirements below the skill object (older servers below SkillExecution);
+        // Python reads only SkillExecution and finds nothing here (DEVIATIONS).
         await using var server = await ServerFixture.ConnectAsync();
         var skills = server.Machines["DummyMachine"].SkillSet;
-        Assert.Equal([NodeId.Parse("ns=1;s=DummyMachine.SkillSet.DummySkill.SkillExecution")], skills["CompositeDummySkill"].DependsOn);
+
+        Assert.Equal([NodeId.Parse("ns=1;s=DummyMachine.SkillSet.DummySkill")], skills["CompositeDummySkill"].DependsOn);
         Assert.Empty(skills["DummySkill"].DependsOn);
+        Assert.Empty(server.Machines["DummyMachine"].MethodSet["DummyMethod"].DependsOn);
     }
 
     [Fact]
     public async Task Users_expose_lock_priority()
     {
         await using var server = await ServerFixture.ConnectAsync();
-        var orchestrator = server.Machines["DummyMachine"].Users.Single(u => u.Name == "orchestrator");
+        var orchestrator = server.Users["orchestrator"];
         Assert.Equal("10", orchestrator.Data.UserLevel);
         Assert.Equal(10, orchestrator.LockPriority);
         Assert.True(orchestrator.Data.IsPresent);

@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using Opc.Ua;
 using Opc.Ua.Client;
 
@@ -7,6 +8,11 @@ namespace OpenSmi.Client;
 internal static class UaUtil
 {
     public static NodeId ToNodeId(ISession session, ExpandedNodeId id) => ExpandedNodeId.ToNodeId(id, session.NamespaceUris);
+
+    /// <summary>The node id independent of namespace indexes, for ordering (opensmi-core <c>ua_to_node_id_definition</c>).</summary>
+    public static NodeIdKey ToKey(ISession session, NodeId id) => new(
+        session.NamespaceUris.GetString(id.NamespaceIndex) ?? throw new KeyNotFoundException($"Unknown namespace index {id.NamespaceIndex}"),
+        id.Identifier);
 
     /// <summary>Hierarchical forward children (objects, variables, methods); empty if the node does not exist.</summary>
     public static async Task<IReadOnlyList<ReferenceDescription>> BrowseChildrenAsync(ISession session, NodeId nodeId, CancellationToken ct) =>
@@ -23,6 +29,15 @@ internal static class UaUtil
         var (results, errors) = await session.ManagedBrowseAsync(null, null, nodeIds, 0, direction, referenceType,
             true, nodeClassMask, ct).ConfigureAwait(false);
         return [.. results.Select((r, i) => ServiceResult.IsBad(errors[i]) || r == null ? [] : (IReadOnlyList<ReferenceDescription>)r)];
+    }
+
+    /// <summary>A unique path segment per child node (see <see cref="PathSegments.Unique"/>), from its browse name.</summary>
+    public static Dictionary<NodeId, string> UniqueSegments(ISession session, IEnumerable<ReferenceDescription> children, ILogger logger)
+    {
+        var names = new Dictionary<NodeId, string>();
+        foreach (var child in children) names.TryAdd(ToNodeId(session, child.NodeId), child.BrowseName.Name ?? "");
+        var byKey = names.Keys.ToDictionary(id => ToKey(session, id));
+        return PathSegments.Unique(byKey.Select(kv => (kv.Key, names[kv.Value])), logger).ToDictionary(kv => byKey[kv.Key], kv => kv.Value);
     }
 
     public static ReferenceDescription? Child(this IReadOnlyList<ReferenceDescription> refs, string name) =>
@@ -44,7 +59,7 @@ internal static class UaUtil
     }
 
     /// <summary>Calls a method without input arguments; a bad status becomes an <see cref="OpenSmiStatusException"/>.</summary>
-    public static async Task<VariantCollection> CallAsync(ISession session, NodeId objectId, NodeId methodId, string path, CancellationToken ct)
+    public static async Task<VariantCollection> CallAsync(ISession session, NodeId objectId, NodeId methodId, ObjectPath path, CancellationToken ct)
     {
         var response = await session.CallAsync(null,
             [new CallMethodRequest { ObjectId = objectId, MethodId = methodId }], ct).ConfigureAwait(false);

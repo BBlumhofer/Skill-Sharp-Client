@@ -94,6 +94,11 @@ Python-Client `opensmi-client @ e8740c2`. Abnahme: SPEC §12
 - [26 Unit-Enum](issues/26-unit-enum.md): 2133 Einheiten generiert aus opensmi-core
   (`tools/generate_units.py`), Python-Namen (`CENTIMETRE`), Helfer in `Units`, Abbildung per `eu.ToUnit()`.
 
+- [34 Version 2.0.0](issues/34-version-2-upstream-9026539.md): Upstream 9026539 / opensmi-server 0.3.1
+  portiert (Pfade, Samples, User am Server, DTOs entfernt), Tests gegen alle Server-Beispiele, `legacy/`
+  gelöscht, Tag `skillsharp-legacy-final`, Paket `SkillSharp.Client` 2.0.0, Requirements am Skill-Objekt
+  gelesen, Actions auf Node 24.
+
 ## Not yet specified
 
 - Abgleich gegen die Beispielserver von opensmi-server (2026-10-29): `quick_start` (19 Objekte) und
@@ -102,7 +107,7 @@ Python-Client `opensmi-client @ e8740c2`. Abnahme: SPEC §12
   Python und C# liefern dieselben 19 Objekte.
 - Retry einzelner fehlgeschlagener Monitored Items (SPEC §7.1): bisher kein realistischer Auslöser
   gegen den Dummy-Server; erst ticketfähig, wenn ein echter Server das Problem zeigt.
-- Release 0.1.0, NuGet und Repo-Umbenennung: warten auf die Frage, ob SmartFactory-KL den Client aufnimmt.
+- NuGet-Veröffentlichung von 2.0.0 und Repo-Umbenennung: warten auf die Frage, ob SmartFactory-KL den Client aufnimmt (#9).
 
 ## Out of scope
 
@@ -110,3 +115,12 @@ Python-Client `opensmi-client @ e8740c2`. Abnahme: SPEC §12
   ([03](issues/03-offene-entscheidungen-spec11.md)).
 - Server-Implementierung, Port von `opensmi-core` jenseits des Client-Bedarfs (SPEC §1).
 - API-Kompatibilität zum alten `SkillSharp.Client` (kein Konsument mehr, SPEC §1).
+
+## Offene Punkte auf GitHub (ab 2026-10-30)
+
+Was nach dem PR [#2](https://github.com/BBlumhofer/Skill-Sharp-Client/pull/2) offen ist, wird als
+GitHub-Issue weitergeführt, nicht mehr hier:
+[#3 LICENSE/NOTICE](https://github.com/BBlumhofer/Skill-Sharp-Client/issues/3), [#4 leeres catch](https://github.com/BBlumhofer/Skill-Sharp-Client/issues/4), [#5 Lock-Bug in opensmi-server](https://github.com/BBlumhofer/Skill-Sharp-Client/issues/5),
+[#6 Tag und legacy/ löschen (Ticket 33)](https://github.com/BBlumhofer/Skill-Sharp-Client/issues/6), [#7 Item-Retry](https://github.com/BBlumhofer/Skill-Sharp-Client/issues/7), [#8 SmartFactory-Paket](https://github.com/BBlumhofer/Skill-Sharp-Client/issues/8),
+[#9 Release/NuGet/Umbenennung](https://github.com/BBlumhofer/Skill-Sharp-Client/issues/9), [#10 CI-Actions](https://github.com/BBlumhofer/Skill-Sharp-Client/issues/10), [#11 Test NodeId-Schreiben](https://github.com/BBlumhofer/Skill-Sharp-Client/issues/11),
+[#12 Completing nach Completed](https://github.com/BBlumhofer/Skill-Sharp-Client/issues/12).

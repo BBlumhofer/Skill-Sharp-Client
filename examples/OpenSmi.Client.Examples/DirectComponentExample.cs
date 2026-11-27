@@ -19,6 +19,13 @@ public static class DirectComponentExample
             browseRules: [BrowseRule.Default], // browse everything, can be specified as usual
             cancellationToken: cancellationToken);
 
-        Console.WriteLine(Print.Json(component.ToDto()));
+        Console.WriteLine(Print.Json(new
+        {
+            Component = component.Name,
+            Path = component.Path.ToString(),
+            State = component.CurrentState,
+            Parameters = component.ParameterSet.Values.Select(v => v.Name),
+            Skills = component.SkillSet.Keys,
+        }));
     }
 }

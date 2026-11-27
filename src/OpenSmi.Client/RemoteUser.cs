@@ -5,13 +5,15 @@ namespace OpenSmi.Client;
 /// <param name="UserLevel">Lock priority as the server writes it (string); higher may break the lock.</param>
 public sealed record RemoteUserData(string Name, bool AllowMultiple, string UserLevel, int MaxAccessLevel, bool IsPresent);
 
-/// <summary>Port of <c>client/remote_user.py</c>: an entry of MachineryBuildingBlocks/Users.</summary>
+/// <summary>Port of <c>client/remote_user.py</c>: a user of the server, path <c>/Users/&lt;name&gt;</c>.</summary>
 public sealed class RemoteUser : RemoteUaObject
 {
-    internal RemoteUser(string name, NodeId nodeId, RemoteServer server, RemoteMachine parent) : base(name, nodeId, server, parent)
+    internal RemoteUser(string name, string segment, NodeId nodeId, RemoteServer server) : base(name, nodeId, server, null, segment: segment)
     {
         Data = new(name, false, "", 0, false);
     }
+
+    private protected override string Folder => "Users";
 
     public RemoteUserData Data { get; private set; }
     public event AsyncEventHandler<UserPresenceChangedEventArgs>? UserPresenceChanged;

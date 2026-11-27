@@ -1,4 +1,0 @@
-<Solution>
-  <Project Path="UAClient.Tests/UAClient.Tests.csproj" />
-  <Project Path="UAClient/UAClient.csproj" />
-</Solution>
