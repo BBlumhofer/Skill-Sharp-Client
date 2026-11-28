@@ -116,6 +116,12 @@ Python-Client `opensmi-client @ e8740c2`. Abnahme: SPEC §12
 - Server-Implementierung, Port von `opensmi-core` jenseits des Client-Bedarfs (SPEC §1).
 - API-Kompatibilität zum alten `SkillSharp.Client` (kein Konsument mehr, SPEC §1).
 
+## Doku (2026-11-28)
+
+SPEC, UMBAUPLAN und die Analyse-Inventare unter `docs/opensmi/` sind entfernt (in der Git-Historie bis `33b317d`).
+Die Doku folgt jetzt dem Aufbau von opensmi-server: README plus Konzeptseiten unter `docs/`, auf Englisch;
+`DEVIATIONS.md` ist `docs/deviations.md`. Verweise in den Tickets auf SPEC beziehen sich auf diesen alten Stand.
+
 ## Offene Punkte auf GitHub (ab 2026-10-30)
 
 Was nach dem PR [#2](https://github.com/BBlumhofer/Skill-Sharp-Client/pull/2) offen ist, wird als

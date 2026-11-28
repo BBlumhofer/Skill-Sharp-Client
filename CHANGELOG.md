@@ -2,51 +2,37 @@
 
 ## 2.0.0 (2026-11-27)
 
-Version 2.0.0 of the package `SkillSharp.Client` replaces the old client 1.x completely; namespace and
-assembly are `OpenSmi.Client`. It is a port of the Python
-`opensmi-client` at `9026539` (opensmi-core 0.7.1) and is tested against `opensmi-server` 0.3.1. The old
-client is removed from the repository; its last state is tagged `skillsharp-legacy-final` (`e57b3c0`).
+Version 2.0.0 of the package `SkillSharp.Client` replaces the old SkillSharp client 1.x. Namespace and assembly are
+`OpenSmi.Client`. The client ports the Python `opensmi-client` at `9026539` (opensmi-core 0.7.1) and is tested
+against opensmi-server 0.3.1. The old code is removed from the repository; its last state is commit `e57b3c0`, to be
+tagged `skillsharp-legacy-final`.
 
-### Breaking changes compared to the first port (`e8740c2`)
+There is no API compatibility with 1.x. Start with the quick start in the README and the examples in
+`examples/OpenSmi.Client.Examples`.
 
-- **Paths** are `ObjectPath` instead of `string` and contain the OpenSMI folders:
-  `/M1/Components/Gripper/SkillSet/Pick` instead of `/M1/Gripper/Pick`. Segments are unique: names with
-  `/` or empty names are sanitized, duplicates get `_2`, `_3`, ... in NodeId order. All collections are
-  keyed by segment.
-- **Browse rules** match `ObjectPath`; `Match.Path`/`Match.PathPrefix` check their argument when the rule
-  is made. New: `Match.Glob("/M1/**/SkillSet/*")`.
-- **Users** belong to the server: `RemoteServer.Users`, path `/Users/<name>`, read from `Objects/Users`
-  (fallback for servers before 0.3: `MachineryBuildingBlocks/Users` of every machine).
-  `RemoteMachine.Users` is gone.
-- **Checks** are `RemoteSkillCheck` with `Skill` and a path below their skill
-  (`/M1/SkillSet/Pick/FeasibilityCheck`); `FeasibilityCheckSet`/`PreconditionCheckSet` hold them.
-- **Samples**: `RemoteVariable.Sample` (value, variant, status, quality, timestamps). `ValueChanged`
-  carries the sample and fires on value or status changes, not on a new timestamp alone. `Timestamp` is
-  the source timestamp (fallback server timestamp). `ReadHistoryAsync` returns samples, `TimestampedValue`
-  is gone. `WatchValueAsync` yields samples.
-- **Component state** is `MachineryItemState?` instead of a string (`null` without a CurrentState node);
-  `StatusChanged` carries a `Sample<MachineryItemState?>`. Skills have `CurrentStateSample`, and
-  `StateChanged` carries a `Sample<SkillState>`.
-- **DTOs** (`ToDto()`, `Dto.cs`, the `dto` example) are removed, as upstream did.
-- Unknown states throw `OpenSmiUnknownStateException` (a `OpenSmiProtocolException`).
-- `RemoteComponent.CreateAsync` without parent gets the path `/Components/<name>`.
+### Breaking changes since the first port (`e8740c2`)
+
+- Paths are `ObjectPath` instead of `string` and contain the OpenSMI folders: `/M1/Components/Gripper/SkillSet/Pick`
+  instead of `/M1/Gripper/Pick`. Segments are unique (sanitized, duplicates suffixed `_2`, `_3`, ... in node ID
+  order), and all collections are keyed by segment.
+- Browse rules match `ObjectPath`. `Match.Path` and `Match.PathPrefix` check a string path when the rule is made.
+- Users belong to the server: `RemoteServer.Users`, path `/Users/<name>`. `RemoteMachine.Users` is gone.
+- Checks are `RemoteSkillCheck` below their skill (`/M1/SkillSet/Pick/FeasibilityCheck`).
+- Variables cache a `Sample`; `ValueChanged` carries it and fires on value or status changes only. `Timestamp` is
+  the source timestamp. `ReadHistoryAsync` returns samples; `TimestampedValue` and `ReadRawValueAsync` are gone.
+- The component state is `MachineryItemState?` instead of a string. Skills have `CurrentStateSample`.
+- DTOs (`ToDto()`, the `dto` example) are removed, as upstream did.
+- Unknown states throw `OpenSmiUnknownStateException`.
+- `RemoteComponent.CreateAsync` without parent gives the path `/Components/<name>`.
 
 ### New
 
-- `RemoteServer.Resolve`/`ResolveOptional`/`Find` and the same, relative, on every object.
-- Variables listed in several groups are one object; the owner (HasComponent) gives the path, other
-  places (Organizes) are `Aliases`.
-- Notifications are routed by monitored item and read `ErrorCode` from the MachineSet AlertType, so
-  alerts of opensmi-server 0.3 arrive with their code even when their source is a child object.
+- `Resolve`, `ResolveOptional` and `Find` (glob) on the server and, relative, on every object; `Match.Glob`.
+- A variable listed in several groups is one object: the owner (`HasComponent`) gives the path, other groups
+  (`Organizes`) are `Aliases`.
+- Notifications are routed by monitored item and read `ErrorCode` from the MachineSet `AlertType`.
 - Skill and component states are read while browsing, so they are known when `ConnectAsync` returns.
-- `RemoteSkill.DependsOn` is filled again on opensmi-server 0.3, which moved `Requirements` from
-  `SkillExecution` to the skill object; both places are read.
-- CI: actions on Node.js 24 (`checkout@v7`, `setup-dotnet@v6`, `setup-python@v7`, `upload-artifact@v7`),
-  the NuGet package is built and uploaded as artifact `nuget-package`.
-- Tests against every opensmi-server example (check, dictionary_entries, quick_start, rsl, dummy) and a
-  port of the upstream test server, each compared with the Python client as oracle.
-
-### Migration from SkillSharp.Client 1.x
-
-There is no API compatibility with 1.x (no consumer left, see `docs/opensmi/SPEC.md` §1). The namespace is
-`OpenSmi.Client`; start with the README's quick start and the examples in `examples/OpenSmi.Client.Examples`.
+- `DependsOn` is filled on opensmi-server 0.3, which moved `Requirements` to the skill object.
+- CI runs on Node.js 24 actions and uploads the NuGet package as artifact `nuget-package`.
+- Tests against every example of opensmi-server and a port of the Python client's test server, each compared with the
+  Python client as oracle.

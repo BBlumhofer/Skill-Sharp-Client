@@ -200,7 +200,7 @@ public class SkillTests
     public async Task Requirements_give_dependencies()
     {
         // opensmi-server 0.3 puts Requirements below the skill object (older servers below SkillExecution);
-        // Python reads only SkillExecution and finds nothing here (DEVIATIONS).
+        // Python reads only SkillExecution and finds nothing here (docs/deviations.md).
         await using var server = await ServerFixture.ConnectAsync();
         var skills = server.Machines["DummyMachine"].SkillSet;
 

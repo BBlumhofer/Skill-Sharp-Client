@@ -44,7 +44,7 @@ public abstract class RemoteUaObject
     public RemoteServer Server { get; }
     public IReadOnlyList<BrowseRule> BrowseRules { get; }
     public bool IsInitialized => _init is { IsCompletedSuccessfully: true };
-    /// <summary>Non-fatal failures of child browses; the failed child is simply missing.</summary>
+    /// <summary>Failures of child browses; a failed child is left out.</summary>
     public IReadOnlyList<Exception> InitExceptions => InitExceptionList;
 
     private protected List<Exception> InitExceptionList { get; } = [];
