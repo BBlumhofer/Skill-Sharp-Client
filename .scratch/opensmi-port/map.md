@@ -1,132 +1,132 @@
-# Map: Skill-Sharp-Client → OpenSMI-Client für C#
+# Map: Skill-Sharp-Client → OpenSMI client for C#
 
 Label: wayfinder:map
 
 ## Destination
 
-Eine C#-Bibliothek `OpenSmi.Client`, die sich gegenüber dem `opensmi-server` verhält wie der
-Python-Client `opensmi-client @ e8740c2`. Abnahme: SPEC §12
+A C# library `OpenSmi.Client` that behaves towards the `opensmi-server` like the
+Python client `opensmi-client @ e8740c2`. Acceptance: SPEC §12
 ([docs/opensmi/SPEC.md](../../docs/opensmi/SPEC.md)).
 
 ## Notes
 
-- **Ausführung gehört zu dieser Map** (Abweichung vom Wayfinder-Default): Der Nutzer hat
-  verlangt, die Tickets danach per TDD umzusetzen. Implementierungs-Tickets haben `Type: task`
-  (AFK) und werden mit den Skills `tdd` und `ponytail` bearbeitet.
-- **Orakel ist immer der Python-Client.** Referenz-Checkout:
-  `C:\Users\BenjaminBlumhofer\Repos\CA-Modul\opensmi-port\opensmi-client` (e8740c2). Bei Fragen
-  zum Verhalten gilt zuerst der Code dort, dann [OI](../../docs/opensmi/analyse/opensmi-client-inventar.md),
-  danach erst SPEC. Abweichungen gibt es nur, wenn sie in SPEC §10 stehen.
-- **Testserver:** `cd ..\opensmi-server\examples\dummy; python main.py` →
-  `opc.tcp://localhost:4843/server`. User (= Passwort, Priorität): visitor 0, planner 5,
+- Execution belongs to this map (a departure from the wayfinder default): the user asked for
+  the tickets to be implemented with TDD afterwards. Implementation tickets have `Type: task`
+  (AFK) and are worked with the skills `tdd` and `ponytail`.
+- The oracle is always the Python client. Reference checkout:
+  `C:\Users\BenjaminBlumhofer\Repos\CA-Modul\opensmi-port\opensmi-client` (e8740c2). For questions
+  about behavior, the code there comes first, then [OI](../../docs/opensmi/analyse/opensmi-client-inventar.md),
+  and only then SPEC. Deviations exist only where SPEC §10 lists them.
+- Test server: `cd ..\opensmi-server\examples\dummy; python main.py` →
+  `opc.tcp://localhost:4843/server`. Users (= password, priority): visitor 0, planner 5,
   orchestrator 10, remote 15, operator 20, developer 100.
-- **Python-Orakel** gegen denselben Server:
-  `$env:PYTHONPATH="<Referenz-Checkout>\src"; python oracle.py`. Das installierte
-  `OpenSMI-Client 1.0.0rc2` passt nicht zum installierten Core und lässt sich nicht verwenden.
-- **Seams (TDD):**
-  1. Öffentliche API von `OpenSmi.Client` gegen den echten `opensmi-server`
-     (Integrationstests). Das ist der Haupt-Seam, das SDK wird nicht gemockt.
-  2. Reine Funktionen ohne Server: BrowseRules/Matcher, Zustands-Parsing, Notification-Parsing,
-     `AsyncSignal`. Hier laufen Unit-Tests.
-- Ponytail: Was die Python-Version nicht hat und SPEC nicht verlangt, wird nicht gebaut.
-- **Parallele Agenten:** Jeder Agent bekommt einen eigenen Port (`OPENSMI_TEST_PORT`, eigene
-  `TestServer`-Ports) und ein eigenes Build-Verzeichnis (`dotnet test OpenSmi.Client.slnx
-  --artifacts-path .artifacts/<name>`). Agenten fassen keine Dateien eines anderen offenen Tickets an.
+- Python oracle against the same server:
+  `$env:PYTHONPATH="<reference checkout>\src"; python oracle.py`. The installed
+  `OpenSMI-Client 1.0.0rc2` does not match the installed core and cannot be used.
+- Seams (TDD):
+  1. Public API of `OpenSmi.Client` against the real `opensmi-server`
+     (integration tests). This is the main seam; the SDK is not mocked.
+  2. Pure functions without a server: BrowseRules/Matcher, state parsing, notification parsing,
+     `AsyncSignal`. Unit tests run here.
+- Ponytail: anything the Python version lacks and SPEC does not require is not built.
+- Parallel agents: each agent gets its own port (`OPENSMI_TEST_PORT`, its own
+  `TestServer` ports) and its own build directory (`dotnet test OpenSmi.Client.slnx
+  --artifacts-path .artifacts/<name>`). Agents do not touch files of another open ticket.
 
 ## Decisions so far
 
-- [01 Lage von `Requirements`](issues/01-requirements-lage.md): Liegt an Skill **und**
-  `SkillExecution`. Wie Python wird nur `SkillExecution` gelesen, die Suche an zwei Stellen entfällt.
-- [02 Testserver lokal startbar](issues/02-testserver-lokal.md): Ja, Python 3.12 und
-  opensmi-server sind editable installiert, Endpoint `/server` auf Port 4843.
-- [04 Repo-Reparatur](issues/04-repo-reparatur-und-zugangsdaten.md): `.git` neu aus origin, Branch
-  `opensmi-port`; die Passwörter sind nur Testzugänge.
-- [05 Skelett](issues/05-skelett-und-server-fixture.md): ein Testprojekt, die Fixture nutzt einen
-  laufenden Server mit. Der Altcode liegt in `legacy/`.
-- [06 RemoteServer](issues/06-remote-server-connect.md): `DefaultSessionFactory` ohne Reflection,
-  vorerst nur NoSecurity.
-- [07 Signals/Subscriptions](issues/07-signals-und-subscriptions.md): serieller Channel-Dispatch;
-  kein Abbestellen, das Chunking erledigt das SDK.
-- [08 BrowseRules](issues/08-browse-rules.md): 1:1 aus `browse.py`.
-- [09 Browse-Modell](issues/09-browse-modell-und-variablen.md): Die Reihenfolge der Dictionaries
-  ist kein Vertrag, Custom-Enum-Typen sind nicht portiert.
-- [10 Schreiben](issues/10-variablen-schreiben.md): Batch-Write mit Einzel-Fallback.
-- [11 RemoteSkill](issues/11-remote-skill.md): Der Server prüft den Zustand vor dem Lock.
-- [12 RemoteMethod](issues/12-remote-method.md): wie Python.
-- [13 RemoteLock](issues/13-remote-lock.md): `BreakLock` übernimmt den Lock; `ExitLock` ohne Lock
-  gibt AccessDenied.
-- [14 AutoLock](issues/14-auto-lock.md): wie Python.
+- [01 Location of `Requirements`](issues/01-requirements-lage.md): it sits on the skill and on
+  `SkillExecution`. Like Python, only `SkillExecution` is read; the search in two places is dropped.
+- [02 Test server can be started locally](issues/02-testserver-lokal.md): yes, Python 3.12 and
+  opensmi-server are installed as editable, endpoint `/server` on port 4843.
+- [04 Repo repair](issues/04-repo-reparatur-und-zugangsdaten.md): `.git` recreated from origin, branch
+  `opensmi-port`; the passwords are only test accounts.
+- [05 Skeleton](issues/05-skelett-und-server-fixture.md): one test project; the fixture reuses a
+  running server. The old code lives in `legacy/`.
+- [06 RemoteServer](issues/06-remote-server-connect.md): `DefaultSessionFactory` without reflection,
+  NoSecurity only for now.
+- [07 Signals/Subscriptions](issues/07-signals-und-subscriptions.md): serial channel dispatch;
+  no unsubscribe, the SDK does the chunking.
+- [08 BrowseRules](issues/08-browse-rules.md): 1:1 from `browse.py`.
+- [09 Browse model](issues/09-browse-modell-und-variablen.md): the order of the dictionaries
+  is not a contract; custom enum types are not ported.
+- [10 Writing](issues/10-variablen-schreiben.md): batch write with a single-write fallback.
+- [11 RemoteSkill](issues/11-remote-skill.md): the server checks the state before the lock.
+- [12 RemoteMethod](issues/12-remote-method.md): as in Python.
+- [13 RemoteLock](issues/13-remote-lock.md): `BreakLock` takes over the lock; `ExitLock` without a lock
+  returns AccessDenied.
+- [14 AutoLock](issues/14-auto-lock.md): as in Python.
 - [15 RemoteUser](issues/15-remote-user.md): `LockPriority`.
-- [16 Notifications](issues/16-notifications.md): ohne den Fallback auf `Messages`.
-- [17 DTOs](issues/17-dto.md): Parität mit dem Python-Orakel (113 Objekte) ist getestet.
-- [18 History, Security, Reconnect](issues/18-history-security-reconnect.md): History ist erledigt,
-  der Rest aufgeteilt in 21, 22 und 23.
-- [19 Beispiele und Doku](issues/19-beispiele-und-doku.md): alle 12 Python-Beispiele in einem
-  Konsolenprojekt (`example.py` → `ColdStartExample`), README neu, `DEVIATIONS.md` mit Test je Zeile.
-- [20 Eigener Testserver](issues/20-eigener-testserver.md): `TestServer` mit eigenem Port und
-  optionaler Verschlüsselung, Stop/Restart; der Port des Collection-Servers per `OPENSMI_TEST_PORT`.
-- [03 Offene Entscheidungen](issues/03-offene-entscheidungen-spec11.md): bleibt im Repo, zusätzlich
-  net8.0, das SF-Paket kommt danach, `Unit` wird generiert; das Signalmodell wird neu bewertet.
-- [21 Security](issues/21-security.md): `SecurityOptions` mit Ordner-Stores, Client-Zertifikat
-  einmal erzeugt, exakte Endpoint-Wahl; ein nicht vertrauenswürdiger Server bricht ohne Retry ab.
-- [22 Reconnect im SDK](issues/22-reconnect-im-sdk.md): Ein Recreate liefert eine neue Session mit
-  geklonten Subscriptions; `RemoteServer.Session` und `SubscriptionManager` müssen umhängen,
-  die Objekte bleiben. Backoff 1 s bis 30 s.
-- [23 Reconnect](issues/23-reconnect.md): KeepAlive → `Reconnecting`, neue Session wird übernommen,
-  `SubscriptionManager.Rebind`, Objekte bleiben identisch; Heartbeat baut Data- und Event-Items neu auf.
-  Reste in 28.
-- [27 Best Practice Benachrichtigungen](issues/27-benachrichtigung-best-practice.md): Netzwerk-Clients
-  (MQTTnet 4, RabbitMQ 7, Azure IoT v2, SignalR, NATS) nutzen async Events plus `IAsyncEnumerable` zum
-  Warten; Rx ist kaum verbreitet. Empfohlen werden async Events, Watch-Streams und WaitFor.
-- [24 Multi-Target](issues/24-multi-target-net8.md): `net8.0;net10.0`, Beispiele nur net10.0,
-  Test-Targets laufen nacheinander.
-- [25 Benachrichtigungsmodell](issues/25-benachrichtigungsmodell.md): async Events (nacheinander),
-  Watch-Streams als `IAsyncEnumerable`, WaitFor bleibt; kein Rx; Unit-Enum in PascalCase. Umsetzung in 29.
-- [28 Reconnect-Reste](issues/28-reconnect-reste.md): `WatchdogInterval` (1 s), ohne AutoReconnect
-  → `Disconnected`, kurzer Netzabbruch per TcpProxy getestet. Item-Retry übersprungen (nicht ehrlich testbar).
-- [30 Custom-Datentypen](issues/30-custom-datentypen.md): Enum-DataTypes über `DataTypeDefinition`
-  (ohne ComplexTypes-Paket); `Value` = Membername, Schreiben per Name oder Zahl; Test mit eigenem Testtyp.
-- [31 Disconnect absichern](issues/31-disconnect-absichern.md): gleichzeitige `DisconnectAsync` teilen
-  einen Abbau; ein Aufruf aus dem `Disconnecting`-Handler kehrt sofort zurück.
-- [32 CI](issues/32-ci.md): GitHub Actions auf Linux, opensmi-server fest auf main 29e4d4a; noch nie gelaufen.
-- [29 Benachrichtigungsmodell umgesetzt](issues/29-benachrichtigungsmodell-umsetzen.md): `AsyncEvents.cs`
-  (Delegate, EventArgs, serielles Raise, Watch-Puffer 8/DropOldest); `AsyncSignal` entfernt; Units in PascalCase.
-- [26 Unit-Enum](issues/26-unit-enum.md): 2133 Einheiten generiert aus opensmi-core
-  (`tools/generate_units.py`), Python-Namen (`CENTIMETRE`), Helfer in `Units`, Abbildung per `eu.ToUnit()`.
+- [16 Notifications](issues/16-notifications.md): without the fallback to `Messages`.
+- [17 DTOs](issues/17-dto.md): parity with the Python oracle (113 objects) is tested.
+- [18 History, Security, Reconnect](issues/18-history-security-reconnect.md): history is done,
+  the rest is split into 21, 22 and 23.
+- [19 Examples and docs](issues/19-beispiele-und-doku.md): all 12 Python examples in one
+  console project (`example.py` → `ColdStartExample`), new README, `DEVIATIONS.md` with a test per row.
+- [20 Own test server](issues/20-eigener-testserver.md): `TestServer` with its own port and
+  optional encryption, stop/restart; the port of the collection server via `OPENSMI_TEST_PORT`.
+- [03 Open decisions](issues/03-offene-entscheidungen-spec11.md): stays in this repo, net8.0 in
+  addition, the SF package comes afterwards, `Unit` is generated; the signal model is reassessed.
+- [21 Security](issues/21-security.md): `SecurityOptions` with folder stores, client certificate
+  created once, exact endpoint selection; an untrusted server aborts without a retry.
+- [22 Reconnect in the SDK](issues/22-reconnect-im-sdk.md): a recreate returns a new session with
+  cloned subscriptions; `RemoteServer.Session` and `SubscriptionManager` have to be rebound,
+  the objects stay. Backoff 1 s to 30 s.
+- [23 Reconnect](issues/23-reconnect.md): KeepAlive → `Reconnecting`, the new session is adopted,
+  `SubscriptionManager.Rebind`, objects stay identical; the heartbeat rebuilds data and event items.
+  Leftovers in 28.
+- [27 Best practice for notifications](issues/27-benachrichtigung-best-practice.md): network clients
+  (MQTTnet 4, RabbitMQ 7, Azure IoT v2, SignalR, NATS) use async events plus `IAsyncEnumerable` for
+  waiting; Rx is rarely used. Recommended: async events, watch streams and WaitFor.
+- [24 Multi-target](issues/24-multi-target-net8.md): `net8.0;net10.0`, examples only net10.0,
+  test targets run one after the other.
+- [25 Notification model](issues/25-benachrichtigungsmodell.md): async events (one after the other),
+  watch streams as `IAsyncEnumerable`, WaitFor stays; no Rx; unit enum in PascalCase. Implemented in 29.
+- [28 Reconnect leftovers](issues/28-reconnect-reste.md): `WatchdogInterval` (1 s), without AutoReconnect
+  → `Disconnected`, short network drop tested with a TcpProxy. Item retry skipped (cannot be tested honestly).
+- [30 Custom data types](issues/30-custom-datentypen.md): enum DataTypes via `DataTypeDefinition`
+  (without the ComplexTypes package); `Value` = member name, writing by name or number; test with its own test type.
+- [31 Hardening disconnect](issues/31-disconnect-absichern.md): concurrent `DisconnectAsync` calls share
+  one teardown; a call from the `Disconnecting` handler returns immediately.
+- [32 CI](issues/32-ci.md): GitHub Actions on Linux, opensmi-server pinned to main 29e4d4a; has never run.
+- [29 Notification model implemented](issues/29-benachrichtigungsmodell-umsetzen.md): `AsyncEvents.cs`
+  (delegate, EventArgs, serial raise, watch buffer 8/DropOldest); `AsyncSignal` removed; units in PascalCase.
+- [26 Unit enum](issues/26-unit-enum.md): 2133 units generated from opensmi-core
+  (`tools/generate_units.py`), Python names (`CENTIMETRE`), helpers in `Units`, mapping via `eu.ToUnit()`.
 
-- [34 Version 2.0.0](issues/34-version-2-upstream-9026539.md): Upstream 9026539 / opensmi-server 0.3.1
-  portiert (Pfade, Samples, User am Server, DTOs entfernt), Tests gegen alle Server-Beispiele, `legacy/`
-  gelöscht, Tag `skillsharp-legacy-final`, Paket `SkillSharp.Client` 2.0.0, Requirements am Skill-Objekt
-  gelesen, Actions auf Node 24.
+- [34 Version 2.0.0](issues/34-version-2-upstream-9026539.md): upstream 9026539 / opensmi-server 0.3.1
+  ported (paths, samples, users on the server, DTOs removed), tests against all server examples, `legacy/`
+  deleted, tag `skillsharp-legacy-final`, package `SkillSharp.Client` 2.0.0, requirements read from the
+  skill object, actions on Node 24.
 
 ## Not yet specified
 
-- Abgleich gegen die Beispielserver von opensmi-server (2026-10-29): `quick_start` (19 Objekte) und
-  `dictionary_entries` (15) sind identisch mit dem Python-Client. `rsl` startet wegen eines Server-Fehlers
-  nicht auf dem lokalen Feature-Branch 547ce5b; auf opensmi-server `main` (29e4d4a) läuft `rsl`, und
-  Python und C# liefern dieselben 19 Objekte.
-- Retry einzelner fehlgeschlagener Monitored Items (SPEC §7.1): bisher kein realistischer Auslöser
-  gegen den Dummy-Server; erst ticketfähig, wenn ein echter Server das Problem zeigt.
-- NuGet-Veröffentlichung von 2.0.0 und Repo-Umbenennung: warten auf die Frage, ob SmartFactory-KL den Client aufnimmt (#9).
+- Comparison against the example servers of opensmi-server (2026-10-29): `quick_start` (19 objects) and
+  `dictionary_entries` (15) are identical to the Python client. `rsl` does not start on the local feature
+  branch 547ce5b because of a server bug; on opensmi-server `main` (29e4d4a) `rsl` runs, and
+  Python and C# return the same 19 objects.
+- Retry of individual failed monitored items (SPEC §7.1): so far no realistic trigger
+  against the dummy server; it becomes a ticket only once a real server shows the problem.
+- NuGet release of 2.0.0 and repo rename: waiting on whether SmartFactory-KL adopts the client (#9).
 
 ## Out of scope
 
-- SmartFactory-Paket (Ports, Storages, Nachbarn, Recovery): eigenes Vorhaben nach dem Client
+- SmartFactory package (ports, storages, neighbors, recovery): a separate project after the client
   ([03](issues/03-offene-entscheidungen-spec11.md)).
-- Server-Implementierung, Port von `opensmi-core` jenseits des Client-Bedarfs (SPEC §1).
-- API-Kompatibilität zum alten `SkillSharp.Client` (kein Konsument mehr, SPEC §1).
+- Server implementation, porting `opensmi-core` beyond what the client needs (SPEC §1).
+- API compatibility with the old `SkillSharp.Client` (no consumer left, SPEC §1).
 
-## Doku (2026-11-28)
+## Docs (2026-11-28)
 
-SPEC, UMBAUPLAN und die Analyse-Inventare unter `docs/opensmi/` sind entfernt (in der Git-Historie bis `33b317d`).
-Die Doku folgt jetzt dem Aufbau von opensmi-server: README plus Konzeptseiten unter `docs/`, auf Englisch;
-`DEVIATIONS.md` ist `docs/deviations.md`. Verweise in den Tickets auf SPEC beziehen sich auf diesen alten Stand.
+SPEC, UMBAUPLAN and the analysis inventories under `docs/opensmi/` have been removed (in the Git history up to `33b317d`).
+The docs now follow the layout of opensmi-server: README plus concept pages under `docs/`, in English;
+`DEVIATIONS.md` is `docs/deviations.md`. References to SPEC in the tickets refer to that old state.
 
-## Offene Punkte auf GitHub (ab 2026-10-30)
+## Open items on GitHub (from 2026-10-30)
 
-Was nach dem PR [#2](https://github.com/BBlumhofer/Skill-Sharp-Client/pull/2) offen ist, wird als
-GitHub-Issue weitergeführt, nicht mehr hier:
-[#3 LICENSE/NOTICE](https://github.com/BBlumhofer/Skill-Sharp-Client/issues/3), [#4 leeres catch](https://github.com/BBlumhofer/Skill-Sharp-Client/issues/4), [#5 Lock-Bug in opensmi-server](https://github.com/BBlumhofer/Skill-Sharp-Client/issues/5),
-[#6 Tag und legacy/ löschen (Ticket 33)](https://github.com/BBlumhofer/Skill-Sharp-Client/issues/6), [#7 Item-Retry](https://github.com/BBlumhofer/Skill-Sharp-Client/issues/7), [#8 SmartFactory-Paket](https://github.com/BBlumhofer/Skill-Sharp-Client/issues/8),
-[#9 Release/NuGet/Umbenennung](https://github.com/BBlumhofer/Skill-Sharp-Client/issues/9), [#10 CI-Actions](https://github.com/BBlumhofer/Skill-Sharp-Client/issues/10), [#11 Test NodeId-Schreiben](https://github.com/BBlumhofer/Skill-Sharp-Client/issues/11),
-[#12 Completing nach Completed](https://github.com/BBlumhofer/Skill-Sharp-Client/issues/12).
+Whatever is still open after PR [#2](https://github.com/BBlumhofer/Skill-Sharp-Client/pull/2) is tracked
+as a GitHub issue, no longer here:
+[#3 LICENSE/NOTICE](https://github.com/BBlumhofer/Skill-Sharp-Client/issues/3), [#4 empty catch](https://github.com/BBlumhofer/Skill-Sharp-Client/issues/4), [#5 lock bug in opensmi-server](https://github.com/BBlumhofer/Skill-Sharp-Client/issues/5),
+[#6 tag and delete legacy/ (ticket 33)](https://github.com/BBlumhofer/Skill-Sharp-Client/issues/6), [#7 item retry](https://github.com/BBlumhofer/Skill-Sharp-Client/issues/7), [#8 SmartFactory package](https://github.com/BBlumhofer/Skill-Sharp-Client/issues/8),
+[#9 release/NuGet/rename](https://github.com/BBlumhofer/Skill-Sharp-Client/issues/9), [#10 CI actions](https://github.com/BBlumhofer/Skill-Sharp-Client/issues/10), [#11 test NodeId writing](https://github.com/BBlumhofer/Skill-Sharp-Client/issues/11),
+[#12 Completing after Completed](https://github.com/BBlumhofer/Skill-Sharp-Client/issues/12).

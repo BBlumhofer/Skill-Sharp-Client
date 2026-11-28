@@ -1,4 +1,4 @@
-# 25 Benachrichtigungsmodell: AsyncSignal, .NET-Events, Rx oder IAsyncEnumerable
+# 25 Notification model: AsyncSignal, .NET events, Rx or IAsyncEnumerable
 
 Type: grilling
 Status: resolved
@@ -6,31 +6,31 @@ Blocked by: 27
 
 ## Question
 
-Wie meldet der Client Zustandsänderungen (Status, Skill-Zustand, Variablenwert, Lock, Notifications)?
-Es besteht keine Bindung an `AsyncSignal<T>`. Bewertung und Empfehlung: siehe Kommentar.
+How does the client report state changes (status, skill state, variable value, lock, notifications)?
+There is no commitment to `AsyncSignal<T>`. Assessment and recommendation: see the comment.
 
 ## Comments
 
-**Agent, 2026-10-29 – Bewertung**
+Agent, 2026-10-29: assessment
 
-| Option | Pro | Contra |
+| Option | Pro | Con |
 |---|---|---|
-| `AsyncSignal<T>` (heute) | nah an Python, async Handler | Eigenbau; await im seriellen Dispatch lässt einen langsamen Handler alle Notifications aufhalten; fremd für .NET-Nutzer |
-| `event EventHandler<T>` | idiomatisch, null Abhängigkeiten, mit Rx (`FromEventPattern`) und jedem UI-Framework nutzbar, `sender` ist schon da | Handler synchron (async-Arbeit: selbst starten) |
-| `IObservable<T>` + System.Reactive | mächtig zum Kombinieren | neue Abhängigkeit, Lernkurve, für Statuswechsel überdimensioniert |
-| `IAsyncEnumerable<T>` je Abo | Pull, Backpressure, Abbruch per Token | jeder Nutzer braucht eine Schleife, Mehrfach-Abos brauchen eigene Puffer; passt schlecht zu „mehrere Handler“ |
+| `AsyncSignal<T>` (today) | close to Python, async handlers | home-grown; awaiting in the serial dispatch lets one slow handler hold up all notifications; unfamiliar to .NET users |
+| `event EventHandler<T>` | idiomatic, zero dependencies, usable with Rx (`FromEventPattern`) and any UI framework, `sender` is already there | handlers are synchronous (async work: start it yourself) |
+| `IObservable<T>` + System.Reactive | powerful for composition | new dependency, learning curve, oversized for status changes |
+| `IAsyncEnumerable<T>` per subscription | pull, backpressure, cancellation by token | every user needs a loop, multiple subscriptions need their own buffers; fits "several handlers" poorly |
 
-Empfehlung: **.NET-Events** (`event EventHandler<SkillState>? StateChanged` usw.), ausgelöst aus dem
-seriellen Dispatch-Loop (nie auf dem SDK-Thread), Ausnahmen pro Handler geloggt und isoliert.
-`AsyncSignal` entfällt. Intern nutzt `AutoLock` die Events, Waits nutzen weiter TaskCompletionSource.
+Recommendation: .NET events (`event EventHandler<SkillState>? StateChanged` etc.), raised from the
+serial dispatch loop (never on the SDK thread), exceptions logged and isolated per handler.
+`AsyncSignal` is dropped. Internally `AutoLock` uses the events; waits keep using TaskCompletionSource.
 
 ## Answer
 
-Mit dem Nutzer entschieden (2026-10-29), gestützt auf die Recherche
-[27 Best Practice Benachrichtigungen](27-benachrichtigung-best-practice.md):
-1. `AsyncSignal` entfällt. Neu: `event AsyncEventHandler<XxxEventArgs>` (Handler geben `Task` zurück),
-   `WatchXxxAsync(ct)` als `IAsyncEnumerable`, die `WaitFor…Async`-Methoden bleiben. Kein Rx.
-2. Handler laufen **nacheinander** aus der seriellen Dispatch-Schleife; ein Fehler wird pro Handler geloggt.
-3. Watch-Streams liefern zuerst den aktuellen Wert, jeder Aufrufer hat einen kleinen Puffer, bei Überlauf fliegt das Älteste raus.
-4. Unit-Enum in PascalCase (`Centimetre`), der Python-Name bleibt in `EUInformation.Description`.
-Umsetzung: [29 Benachrichtigungsmodell umsetzen](29-benachrichtigungsmodell-umsetzen.md).
+Decided with the user (2026-10-29), based on the research
+[27 Best practice for notifications](27-benachrichtigung-best-practice.md):
+1. `AsyncSignal` is dropped. New: `event AsyncEventHandler<XxxEventArgs>` (handlers return `Task`),
+   `WatchXxxAsync(ct)` as `IAsyncEnumerable`, the `WaitFor…Async` methods stay. No Rx.
+2. Handlers run one after the other from the serial dispatch loop; an error is logged per handler.
+3. Watch streams deliver the current value first, each caller has a small buffer, on overflow the oldest entry is dropped.
+4. Unit enum in PascalCase (`Centimetre`), the Python name stays in `EUInformation.Description`.
+Implementation: [29 Implement the notification model](29-benachrichtigungsmodell-umsetzen.md).

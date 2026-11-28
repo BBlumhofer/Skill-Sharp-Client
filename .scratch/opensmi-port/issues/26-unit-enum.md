@@ -1,34 +1,34 @@
-# 26 Unit-Enum generieren
+# 26 Generate unit enum
 
 Type: task
 Status: resolved
-Blocked by: –
+Blocked by: none
 
 ## Question
 
-Entscheidung 03: Die ca. 2100 UN/CEFACT-Rec-20-Einheiten aus `opensmi-core/unit_all.py` werden als
-C#-Enum generiert, nicht von Hand geschrieben. Dazu kommen ein Generator-Skript unter `tools/`, die
-generierte Datei `src/OpenSmi.Client/Unit.g.cs` und die Helfer, die Python bietet (`symbol`,
-`from_ua_unit_id`, `from_symbol`, `ua_unit_id`, `ua_eu_information`, siehe `core/unit_base.py`)
-sowie `RemoteVariable.Unit` → `Unit?` als zusätzliche Abbildung. `EUInformation` bleibt erhalten.
+Decision 03: the roughly 2100 UN/CEFACT Rec 20 units from `opensmi-core/unit_all.py` are generated as a
+C# enum, not written by hand. This includes a generator script under `tools/`, the
+generated file `src/OpenSmi.Client/Unit.g.cs` and the helpers that Python offers (`symbol`,
+`from_ua_unit_id`, `from_symbol`, `ua_unit_id`, `ua_eu_information`, see `core/unit_base.py`),
+as well as `RemoteVariable.Unit` → `Unit?` as an additional mapping. `EUInformation` is kept.
 
-## Akzeptanz
+## Acceptance
 
-- Unit: `Unit.FromUaUnitId(<id von „cm“>)` → Symbol `cm`; Round-Trip über `ToEuInformation`
-- Integration: `DummyIntParameter` ergibt die Unit „Zentimeter“
+- Unit: `Unit.FromUaUnitId(<id of "cm">)` → symbol `cm`; round trip via `ToEuInformation`
+- Integration: `DummyIntParameter` yields the unit "centimetre"
 
 ## Answer
 
-API: `enum Unit` (Namen wie in Python, z. B. `CENTIMETRE`; Wert = UA-Unit-Id, also `ua_unit_id` = `(int)unit`) plus
-statische Klasse `Units`: `FromUaUnitId`, `FromSymbol` (unbekannt/mehrdeutig → `ArgumentException`, wie Pythons
-`ValueError`), Extensions `unit.Symbol()`, `unit.ToEuInformation()` (NamespaceUri cefact, DisplayName = Symbol,
-Description = Name) und `euInformation.ToUnit()`. `RemoteVariable.Unit` bleibt `EUInformation?`; die Abbildung ist
-`variable.Unit?.ToUnit()`. Kein zweites Property in `RemoteVariable`, weil dort `Unit` den Typ `Unit` verdecken würde.
-Ein `Unit.FromUaUnitId` ist bei einem Enum nicht möglich, daher `Units.FromUaUnitId`. Python-Aliase (2 Stück) werden
-nicht generiert, damit jeder Enum-Wert eindeutig ist.
+API: `enum Unit` (names as in Python, e.g. `CENTIMETRE`; value = UA unit id, so `ua_unit_id` = `(int)unit`) plus
+the static class `Units`: `FromUaUnitId`, `FromSymbol` (unknown/ambiguous → `ArgumentException`, like Python's
+`ValueError`), extensions `unit.Symbol()`, `unit.ToEuInformation()` (NamespaceUri cefact, DisplayName = symbol,
+Description = name) and `euInformation.ToUnit()`. `RemoteVariable.Unit` stays `EUInformation?`; the mapping is
+`variable.Unit?.ToUnit()`. No second property in `RemoteVariable`, because there `Unit` would hide the type `Unit`.
+A `Unit.FromUaUnitId` is not possible on an enum, hence `Units.FromUaUnitId`. Python aliases (2 of them) are
+not generated, so that every enum value is unique.
 
-Dateien: `tools/generate_units.py` (importiert das installierte opensmi-core, schreibt die Version in den Header),
-`src/OpenSmi.Client/Unit.g.cs` (2133 Einheiten), `src/OpenSmi.Client/Units.cs`.
+Files: `tools/generate_units.py` (imports the installed opensmi-core, writes the version into the header),
+`src/OpenSmi.Client/Unit.g.cs` (2133 units), `src/OpenSmi.Client/Units.cs`.
 
-Tests: `tests/OpenSmi.Client.Tests/UnitTests.cs`: cm ↔ 4410708, Round-Trip über `ToEuInformation`, unbekannte Id,
-`FromSymbol` eindeutig/unbekannt/mehrdeutig („cal“), Integration `DummyIntParameter` → `Unit.CENTIMETRE`. 5/5 grün.
+Tests: `tests/OpenSmi.Client.Tests/UnitTests.cs`: cm ↔ 4410708, round trip via `ToEuInformation`, unknown id,
+`FromSymbol` unique/unknown/ambiguous ("cal"), integration `DummyIntParameter` → `Unit.CENTIMETRE`. 5/5 green.

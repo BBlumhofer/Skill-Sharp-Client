@@ -1,32 +1,32 @@
-# 30 Custom-Datentypen des Servers (custom_type_definitions)
+# 30 Custom data types of the server (custom_type_definitions)
 
 Type: task
 Status: resolved
-Blocked by: –
+Blocked by: none
 
 ## Question
 
-Python lädt beim Connect die Custom-Datentypen des Servers (`load_data_type_definitions`,
-`RemoteServer.custom_type_definitions`). `RemoteVariable` bildet IntEnum-Typen auf Enum-Member ab
-(`remote_variable.py:150-163, 185-205`) und füllt damit `valid_values`. Der C#-Client kennt das noch
-nicht (siehe 09). Mit dem SDK geht das über `Opc.Ua.Client.ComplexTypes` (`ComplexTypeSystem.LoadAsync`).
-Offen ist, ob das Paket im Cache liegt, und welcher Server Custom-Typen für einen ehrlichen Test hat
-(keiner der Beispielserver `dummy`, `quick_start`, `dictionary_entries` hat welche; `rsl` startet nicht).
+On connect, Python loads the server's custom data types (`load_data_type_definitions`,
+`RemoteServer.custom_type_definitions`). `RemoteVariable` maps IntEnum types to enum members
+(`remote_variable.py:150-163, 185-205`) and fills `valid_values` with them. The C# client does not know
+this yet (see 09). With the SDK this works through `Opc.Ua.Client.ComplexTypes` (`ComplexTypeSystem.LoadAsync`).
+Open: whether the package is in the cache, and which server has custom types for an honest test
+(none of the example servers `dummy`, `quick_start`, `dictionary_entries` has any; `rsl` does not start).
 
-## Entscheidung (Nutzer, 2026-10-29)
+## Decision (user, 2026-10-29)
 
-Jetzt bauen und testen, mit einem eigenen kleinen Custom-Enum-Typ, der nur im Testserver-Verzeichnis
-(Kopie des Dummy-Servers im `TestServer`) hinzukommt, nicht in opensmi-server.
+Build and test it now, with a small custom enum type of our own that is added only in the test server directory
+(the copy of the dummy server in `TestServer`), not in opensmi-server.
 
 ## Answer
 
-Umgesetzt ohne ComplexTypes-Paket: `asyncua.new_enum` (so legt opensmi-server `IntEnum`-Variablen an,
-`_server.py:ensure_enum`) schreibt nur `DataTypeDefinition` (`EnumDefinition`), das liest `RemoteVariable`
-für jeden DataType mit Namespace > 0 zusammen mit dem BrowseName. Ergebnis wie Python (Orakel geprüft):
+Implemented without the ComplexTypes package: `asyncua.new_enum` (this is how opensmi-server creates `IntEnum` variables,
+`_server.py:ensure_enum`) writes only `DataTypeDefinition` (`EnumDefinition`); `RemoteVariable` reads that
+for every DataType with namespace > 0, together with the BrowseName. Result as in Python (checked against the oracle):
 `UaDataType = "TestColor"`, `ValidValues = {"0": "Red", "1": "Green", "2": "Blue"}`, `Value = "Green"`
-(Membername statt `IntEnum`, DTO bleibt JSON-freundlich). Schreiben per Name (`"Blue"`) oder Zahl (`0`);
-Python scheitert beim Namen an der asyncua-Serialisierung. Unbekannter Name → `OpenSmiInvalidValueException`.
-Lesefehler der Definition nur Warnung. Structs bleiben `ExtensionObject` (nicht im Scope).
-Test: `CustomTypeTests` mit `TestServer.StartAsync(port, customTypes: true)`, das `custom_types.py` in die
-Dummy-Kopie legt und `DummyComponent.ParameterSet.DummyEnumParameter` ergänzt. Abweichungen in
+(member name instead of `IntEnum`, the DTO stays JSON-friendly). Writing by name (`"Blue"`) or number (`0`);
+Python fails on the name because of the asyncua serialization. Unknown name → `OpenSmiInvalidValueException`.
+A read error of the definition is only a warning. Structs stay `ExtensionObject` (not in scope).
+Test: `CustomTypeTests` with `TestServer.StartAsync(port, customTypes: true)`, which puts `custom_types.py` into the
+dummy copy and adds `DummyComponent.ParameterSet.DummyEnumParameter`. Deviations in
 `docs/opensmi/DEVIATIONS.md`.

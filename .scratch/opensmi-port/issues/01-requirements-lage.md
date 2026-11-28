@@ -1,16 +1,16 @@
-# 01 Lage von `Requirements`
+# 01 Location of `Requirements`
 
 Type: research
 Status: resolved
-Blocked by: –
+Blocked by: none
 
 ## Question
 
-Liegt `Requirements` am Skill-Objekt oder unter `SkillExecution` (SPEC §6, offen)?
+Does `Requirements` sit on the skill object or under `SkillExecution` (SPEC §6, open)?
 
 ## Answer
 
-Gegen den Dummy-Server gebrowst (2026-10-29): `CompositeDummySkill` hat `Requirements` an **beiden**
-Stellen. Der Python-Client liest nur `SkillExecution/Requirements` und findet dort
-`depends_on = [DummySkill.SkillExecution]`. Der C#-Port macht es genauso und sucht nur an dieser
-einen Stelle. Die Suche „an beiden Stellen“ aus SPEC §6 entfällt.
+Browsed against the dummy server (2026-10-29): `CompositeDummySkill` has `Requirements` in both
+places. The Python client reads only `SkillExecution/Requirements` and finds
+`depends_on = [DummySkill.SkillExecution]` there. The C# port does the same and searches only in that
+one place. The search "in both places" from SPEC §6 is dropped.

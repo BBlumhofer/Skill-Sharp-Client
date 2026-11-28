@@ -1,4 +1,4 @@
-# 31 DisconnectAsync gegen gleichzeitige Aufrufe absichern
+# 31 Make DisconnectAsync safe against concurrent calls
 
 Type: task
 Status: resolved
@@ -6,20 +6,20 @@ Blocked by: 30
 
 ## Question
 
-`DisconnectAsync` ist nicht gegen gleichzeitige Aufrufe abgesichert, etwa wenn ein toter Server ohne
-AutoReconnect den Abbau startet und der Nutzer zur selben Zeit `DisconnectAsync` ruft (siehe 28).
-Zwei Aufrufe sollen genau einen Abbau auslösen; beide kehren erst zurück, wenn `Disconnected` erreicht
-ist. Der Item-Retry (SPEC §7.1) bleibt bewusst offen, bis ein echter Server das Problem zeigt.
+`DisconnectAsync` is not protected against concurrent calls, for example when a dead server without
+AutoReconnect starts the teardown and the user calls `DisconnectAsync` at the same time (see 28).
+Two calls should trigger exactly one teardown; both return only once `Disconnected` is reached.
+The item retry (SPEC §7.1) deliberately stays open until a real server shows the problem.
 
-## Akzeptanz
+## Acceptance
 
-- zwei gleichzeitige `DisconnectAsync` → genau eine Folge `Disconnecting` → `Disconnected`, keine Ausnahme
+- two concurrent `DisconnectAsync` calls → exactly one sequence `Disconnecting` → `Disconnected`, no exception
 
 ## Answer
 
-`DisconnectAsync` teilt jetzt einen Abbau-Task: Der erste Aufruf startet `Disconnecting` → Abbau →
-`Disconnected`, alle weiteren (auch der Keep-alive-Abbau ohne AutoReconnect und `DisposeAsync`) warten
-auf denselben Task. Ruft ein `StatusChanged`-Handler für `Disconnecting` selbst `DisconnectAsync`, kehrt
-der Aufruf sofort zurück, statt auf den Abbau zu warten, der auf ihn wartet (kein neuer Deadlock). Nach
-dem Abbau verbindet dieselbe Instanz wieder mit `ConnectAsync`, wie bisher. Test:
+`DisconnectAsync` now shares one teardown task: the first call starts `Disconnecting` → teardown →
+`Disconnected`, all further calls (including the keep-alive teardown without AutoReconnect and `DisposeAsync`) wait
+for the same task. If a `StatusChanged` handler for `Disconnecting` calls `DisconnectAsync` itself, the
+call returns immediately instead of waiting for the teardown that is waiting for it (no new deadlock). After
+the teardown, the same instance can connect again with `ConnectAsync`, as before. Test:
 `RemoteServerTests.Concurrent_disconnects_tear_down_once_and_the_instance_reconnects`.

@@ -1,32 +1,32 @@
-# 04 Git-Repo reparieren, Zugangsdaten entschärfen
+# 04 Repair the Git repo, defuse credentials
 
 Type: task
 Status: resolved
-Blocked by: –
+Blocked by: none
 
 ## Question
 
-Siehe UMBAUPLAN P0. Im lokalen `.git` fehlt `HEAD`, `main` steht auf `9a0a6c2`, origin auf `e57b3c0`,
-und es gibt einen ungeprüften Stash `c19961d`. In der öffentlichen Historie stehen Zugangsdaten
-(`visitor/visitor`, `orchestrator/orchestrator`, interne IP).
+See UMBAUPLAN P0. The local `.git` is missing `HEAD`, `main` points to `9a0a6c2`, origin to `e57b3c0`,
+and there is an unchecked stash `c19961d`. The public history contains credentials
+(`visitor/visitor`, `orchestrator/orchestrator`, an internal IP).
 
-## Checkliste (Mensch)
+## Checklist (human)
 
-- [ ] `echo ref: refs/heads/main> .git\HEAD`, `git fetch origin`, Stash prüfen, `git reset --soft origin/main`
-- [ ] Branch `opensmi-port` anlegen und die neuen Dateien committen
-- [ ] klären, ob die SmartFactory-Passwörter echt sind, und sie gegebenenfalls rotieren
-- [ ] `bin/`, `obj/`, `.vs/` und `TestResults/` aus dem Index entfernen (`.gitignore` ist bereits angelegt)
+- [ ] `echo ref: refs/heads/main> .git\HEAD`, `git fetch origin`, check the stash, `git reset --soft origin/main`
+- [ ] create branch `opensmi-port` and commit the new files
+- [ ] find out whether the SmartFactory passwords are real and rotate them if so
+- [ ] remove `bin/`, `obj/`, `.vs/` and `TestResults/` from the index (`.gitignore` already exists)
 
 ## Answer
 
-Stand 2026-10-29 (vom Agenten auf Wunsch des Nutzers erledigt):
-- Neben dem fehlenden `HEAD` war auch der Objektspeicher defekt: Commit `b8a1eac` fehlte, der Stash
-  `c19961d` verwies auf nicht vorhandene Objekte und war nicht mehr lesbar.
-- Repariert durch frische Git-Metadaten aus `origin` (GitHub). Das alte Verzeichnis liegt als
-  `.git.broken/` (in `.gitignore`), am Arbeitsbaum hat sich nichts geändert. `main` = `e57b3c0`,
-  neuer Branch `opensmi-port`, noch nichts committet (Agenten arbeiten noch).
-- Offen: der erste Commit auf `opensmi-port`, sobald 19/21/23 fertig sind; Prüfung und Rotation der
-  Passwörter `visitor`/`orchestrator` in der SmartFactory (Mensch).
+State on 2026-10-29 (done by the agent at the user's request):
+- Besides the missing `HEAD`, the object store was also broken: commit `b8a1eac` was missing, the stash
+  `c19961d` referred to objects that did not exist and could no longer be read.
+- Repaired with fresh Git metadata from `origin` (GitHub). The old directory is kept as
+  `.git.broken/` (in `.gitignore`); nothing changed in the working tree. `main` = `e57b3c0`,
+  new branch `opensmi-port`, nothing committed yet (agents are still working).
+- Open: the first commit on `opensmi-port` once 19/21/23 are done; checking and rotating the
+  passwords `visitor`/`orchestrator` in the SmartFactory (human).
 
-**Nachtrag 2026-10-29:** Laut Nutzer sind `visitor`/`orchestrator` nur Testzugänge des
-Dummy-Servers; nichts zu rotieren, die Historie bleibt. Der Branch `opensmi-port` ist committet.
+Addendum 2026-10-29: according to the user, `visitor`/`orchestrator` are only test accounts of the
+dummy server; nothing to rotate, the history stays. The branch `opensmi-port` is committed.

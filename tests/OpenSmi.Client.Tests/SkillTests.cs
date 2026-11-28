@@ -19,8 +19,8 @@ public class SkillStateParsingTests
     [Fact]
     public void Notification_message_suffix_is_only_split_without_error_code()
     {
-        Assert.Equal(new NotificationEvent("Fehler", 500, "E42"), NotificationEvent.Parse("Fehler|||E42", 500, null));
-        Assert.Equal(new NotificationEvent("Fehler|||E42", 500, "E1"), NotificationEvent.Parse("Fehler|||E42", 500, "E1"));
+        Assert.Equal(new NotificationEvent("Error", 500, "E42"), NotificationEvent.Parse("Error|||E42", 500, null));
+        Assert.Equal(new NotificationEvent("Error|||E42", 500, "E1"), NotificationEvent.Parse("Error|||E42", 500, "E1"));
         Assert.Equal(new NotificationEvent("Info", 100, ""), NotificationEvent.Parse("Info", 100, ""));
         Assert.Null(NotificationEvent.Parse(null, 100, "E1"));
     }

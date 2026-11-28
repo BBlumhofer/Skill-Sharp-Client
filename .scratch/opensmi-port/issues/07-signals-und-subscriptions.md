@@ -1,4 +1,4 @@
-# 07 AsyncSignal und SubscriptionManager
+# 07 AsyncSignal and SubscriptionManager
 
 Type: task
 Status: resolved
@@ -6,17 +6,17 @@ Blocked by: 06
 
 ## Question
 
-`AsyncSignal<T>`: Handler laufen nebenläufig; Ausnahmen werden geloggt und nicht propagiert.
-Interner `SubscriptionManager`: eine Subscription pro Server, Dedup je NodeId, mehrere Handler je
-Item, Chunking nach `MaxMonitoredItemsPerCall`, Verarbeitung der gelieferten Werte (kein Re-Read),
-Event-Items mit Routing per `SourceNode`. `RemoteServer.TimeUpdated` über CurrentTime. Orakel:
+`AsyncSignal<T>`: handlers run concurrently; exceptions are logged and not propagated.
+Internal `SubscriptionManager`: one subscription per server, dedup per NodeId, several handlers per
+item, chunking by `MaxMonitoredItemsPerCall`, processing of the delivered values (no re-read),
+event items with routing by `SourceNode`. `RemoteServer.TimeUpdated` via CurrentTime. Oracle:
 `core/subscription_manager.py`.
 
-## Akzeptanz
+## Acceptance
 
-- Unit: Eine Ausnahme in einem Handler erreicht den Sender nicht, die übrigen Handler laufen.
-- Integration: `TimeUpdated` feuert innerhalb von 3 s.
+- Unit: an exception in one handler does not reach the sender, the other handlers run.
+- Integration: `TimeUpdated` fires within 3 s.
 
 ## Answer
 
-`AsyncSignal.cs` und `SubscriptionManager.cs`: eine Subscription, Dedup je NodeId, serieller Dispatch über einen Channel, Events routen per SourceNode. Abweichung: Das Chunking übernimmt das SDK beim `ApplyChangesAsync`. Abbestellen (`IAsyncDisposable`) ist **nicht** gebaut, der Python-Client bestellt auch nie ab. Heartbeat-Rebuild → 18.
+`AsyncSignal.cs` and `SubscriptionManager.cs`: one subscription, dedup per NodeId, serial dispatch through a channel, events are routed by SourceNode. Deviation: the SDK does the chunking in `ApplyChangesAsync`. Unsubscribing (`IAsyncDisposable`) is not built; the Python client never unsubscribes either. Heartbeat rebuild → 18.

@@ -1,4 +1,4 @@
-# 12 RemoteMethod.CallAsync und Abhängigkeiten
+# 12 RemoteMethod.CallAsync and dependencies
 
 Type: task
 Status: resolved
@@ -6,15 +6,15 @@ Blocked by: 11
 
 ## Question
 
-`Call` wird beim Init aufgelöst. `CallAsync` ruft ihn ohne Argumente auf und gibt
-`FinalResultData.ReadAllAsync()` zurück. `MinAccessLevel` sowie `DependsOn`/`DependencyOf` über
-`Requires` liegen auf `RemoteCallable`. Orakel: `remote_method.py`, `remote_callable.py`.
+`Call` is resolved at init. `CallAsync` calls it without arguments and returns
+`FinalResultData.ReadAllAsync()`. `MinAccessLevel` as well as `DependsOn`/`DependencyOf` via
+`Requires` live on `RemoteCallable`. Oracle: `remote_method.py`, `remote_callable.py`.
 
-## Akzeptanz (Integration)
+## Acceptance (integration)
 
-- `DummyMethod` mit Lock aufrufen → Ergebnis-Dictionary nicht leer
-- `CompositeDummySkill.DependsOn` enthält `ns=1;s=DummyMachine.SkillSet.DummySkill.SkillExecution`
+- calling `DummyMethod` with a lock → result dictionary not empty
+- `CompositeDummySkill.DependsOn` contains `ns=1;s=DummyMachine.SkillSet.DummySkill.SkillExecution`
 
 ## Answer
 
-`RemoteMethod`, `MinAccessLevel`, `DependsOn`/`DependencyOf` (nur `SkillExecution/Requirements`, siehe 01). Tests in `SkillTests`.
+`RemoteMethod`, `MinAccessLevel`, `DependsOn`/`DependencyOf` (only `SkillExecution/Requirements`, see 01). Tests in `SkillTests`.

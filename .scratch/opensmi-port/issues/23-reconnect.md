@@ -1,4 +1,4 @@
-# 23 Reconnect mit erhaltenen Objektidentitäten und Heartbeat-Rebuild
+# 23 Reconnect with preserved object identities and heartbeat rebuild
 
 Type: task
 Status: resolved
@@ -6,49 +6,49 @@ Blocked by: 21, 22
 
 ## Question
 
-SPEC §4.1 und §7.1: Es gibt nur **einen** Reconnect-Mechanismus über den `SessionReconnectHandler`.
-Der Status wechselt `Connected → Reconnecting → Connected`. Nach dem Reconnect sind `Machines` und
-alle Objekte **dieselben Instanzen** (kein neuer Browse), und Notifications kommen weiter an. Der
-Heartbeat über `CurrentTime` baut die Subscription mit allen Data- **und** Event-Items neu auf,
-wenn länger als `HeartbeatStaleAfter` (Default 10 s) nichts kam. `AutoReconnect` und
-`ReconnectMaxDelay` kommen als Options dazu. Wie das SDK sich verhält, steht in Ticket 22.
+SPEC §4.1 and §7.1: there is only one reconnect mechanism, through the `SessionReconnectHandler`.
+The status changes `Connected → Reconnecting → Connected`. After the reconnect, `Machines` and
+all objects are the same instances (no new browse), and notifications keep arriving. The
+heartbeat via `CurrentTime` rebuilds the subscription with all data and event items
+when nothing arrived for longer than `HeartbeatStaleAfter` (default 10 s). `AutoReconnect` and
+`ReconnectMaxDelay` are added as options. How the SDK behaves is described in ticket 22.
 
-## Akzeptanz (Integration, eigener `TestServer`)
+## Acceptance (integration, own `TestServer`)
 
-- Server stoppen → Status `Reconnecting`; Server neu starten → Status `Connected` innerhalb von 30 s
-- danach `ReferenceEquals` für die Maschine vor und nach dem Reconnect, und `ValueChanged` eines
-  Monitoring-Variablen feuert wieder
-- `DisconnectAsync` während `Reconnecting` beendet sauber mit `Disconnected`
+- stop the server → status `Reconnecting`; restart the server → status `Connected` within 30 s
+- afterwards `ReferenceEquals` holds for the machine before and after the reconnect, and `ValueChanged` of a
+  Monitoring variable fires again
+- `DisconnectAsync` during `Reconnecting` ends cleanly with `Disconnected`
 
 ## Answer
 
-**Design** (wie Ticket 22 empfiehlt):
+Design (as ticket 22 recommends):
 - `RemoteServerOptions`: `AutoReconnect` (true), `ReconnectMaxDelay` (30 s), `HeartbeatStaleAfter` (10 s).
-- `RemoteServer` besitzt einen `SessionReconnectHandler(reconnectAbort: true, ReconnectMaxDelay)`.
-  `KeepAliveInterval` = 2000 ms. Bei Bad-KeepAlive der aktuellen Session: `BeginReconnect(…, 1000)`,
-  `CancelKeepAlive`, Status `Reconnecting`. Im Callback wird bei neuer Session `Session` getauscht, die
-  alte nur `Dispose()`t, und `SubscriptionManager.Rebind` sucht die geklonte Subscription über `Handle`.
-  Danach `Connected`. Objekte bleiben dieselben, kein neuer Browse.
-- `DisconnectAsync`/`TearDown` disposed zuerst den Handler; ein Callback nach dem Disconnect wird
-  ignoriert und eine dabei entstandene Session freigegeben.
-- `SubscriptionManager`: Jede Notification (Data und Event) setzt den Heartbeat-Zeitstempel. Eine
-  Schleife prüft alle `HeartbeatStaleAfter/4`; nur im Status `Connected` zählt die Zeit. Bei Stale wird
-  die Subscription gelöscht (silent) und aus der Session entfernt, dann neu mit allen Data- und
-  Event-Items angelegt. Schlägt das fehl, gibt es beim nächsten Tick einen neuen Versuch. Ein
-  `SemaphoreSlim` serialisiert Subscribe und Rebuild. Den `shortcut:`-Kommentar zum Rebuild habe ich
-  entfernt, der zu Unsubscribe bleibt.
+- `RemoteServer` owns a `SessionReconnectHandler(reconnectAbort: true, ReconnectMaxDelay)`.
+  `KeepAliveInterval` = 2000 ms. On a bad KeepAlive of the current session: `BeginReconnect(…, 1000)`,
+  `CancelKeepAlive`, status `Reconnecting`. In the callback, a new session replaces `Session`, the
+  old one is only `Dispose()`d, and `SubscriptionManager.Rebind` finds the cloned subscription via `Handle`.
+  Then `Connected`. Objects stay the same, no new browse.
+- `DisconnectAsync`/`TearDown` disposes the handler first; a callback after the disconnect is
+  ignored and any session created in it is released.
+- `SubscriptionManager`: every notification (data and event) sets the heartbeat timestamp. A
+  loop checks every `HeartbeatStaleAfter/4`; time only counts in status `Connected`. When stale,
+  the subscription is deleted (silently) and removed from the session, then created again with all data and
+  event items. If that fails, the next tick tries again. A
+  `SemaphoreSlim` serializes subscribe and rebuild. I removed the `shortcut:` comment about the rebuild;
+  the one about unsubscribe stays.
 
-**Tests** (`ReconnectTests`, eigene `TestServer` auf 4894–4896): Neustart → `Reconnecting` →
-`Connected`, dieselbe Maschine, `ValueChanged` feuert wieder. `DisconnectAsync` während `Reconnecting`
-endet in `Disconnected` und bleibt dort, auch wenn der Server wiederkommt. Heartbeat: Die Subscription
-wird über die rohe Session serverseitig gelöscht, danach entsteht eine neue Subscription mit gleicher
-Item-Zahl, und `ValueChanged` feuert wieder.
+Tests (`ReconnectTests`, own `TestServer`s on 4894 to 4896): restart → `Reconnecting` →
+`Connected`, the same machine, `ValueChanged` fires again. `DisconnectAsync` during `Reconnecting`
+ends in `Disconnected` and stays there, even when the server comes back. Heartbeat: the subscription
+is deleted on the server side through the raw session; afterwards a new subscription with the same
+item count appears, and `ValueChanged` fires again.
 
-**Abweichungen/Risiken:**
-- Nicht gesetzt: `TransferSubscriptionsOnReconnect`/`DeleteSubscriptionsOnClose`. Der Neustart braucht
-  sie nicht, weil das SDK die Subscription selbst neu anlegt.
-- Bei `AutoReconnect = false` reagiert der Client nicht auf einen toten Server, der Status bleibt
-  `Connected`. Python würde hier auf `Disconnected` wechseln. Das ist nicht gebaut.
-- `KeepAliveInterval` ist fest auf 2 s eingestellt. `WatchdogInterval` aus SPEC §4.1 ist nicht verdrahtet.
-- Einzel-Item-Retry mit Backoff (SPEC §7.1) ist nicht gebaut, fehlgeschlagene Items werden nur geloggt.
-- Der Reactivate-Pfad (dieselbe Session) ist nicht getestet, nur der Recreate-Pfad über einen Server-Neustart.
+Deviations/risks:
+- Not set: `TransferSubscriptionsOnReconnect`/`DeleteSubscriptionsOnClose`. The restart does not need
+  them because the SDK recreates the subscription by itself.
+- With `AutoReconnect = false` the client does not react to a dead server; the status stays
+  `Connected`. Python would switch to `Disconnected` here. This is not built.
+- `KeepAliveInterval` is fixed at 2 s. `WatchdogInterval` from SPEC §4.1 is not wired up.
+- Single-item retry with backoff (SPEC §7.1) is not built; failed items are only logged.
+- The reactivate path (same session) is not tested, only the recreate path through a server restart.
