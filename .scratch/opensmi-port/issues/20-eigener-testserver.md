@@ -1,4 +1,4 @@
-# 20 Eigener Testserver je Test und Agent
+# 20 Own test server per test and agent
 
 Type: task
 Status: resolved
@@ -6,14 +6,14 @@ Blocked by: 05
 
 ## Question
 
-Security und Reconnect brauchen einen Server, den der Test verschlüsselt starten bzw. stoppen und
-neu starten kann. Parallel arbeitende Agenten dürfen sich weder Locks noch `obj/` teilen.
+Security and reconnect need a server that the test can start encrypted, or stop and
+restart. Agents working in parallel must not share locks or `obj/`.
 
 ## Answer
 
-`tests/OpenSmi.Client.Tests/TestServer.cs`: `TestServer.StartAsync(port, encryption)` kopiert
-`opensmi-server/examples/dummy` in ein Temp-Verzeichnis und patcht dort Port und `encryption` in
-`config.toml`. Es gibt `StopAsync`, `StartAgainAsync` und `CertificatePath` (Server-Zertifikat,
-wird beim ersten verschlüsselten Start erzeugt). Der gemeinsame Server der Collection `server` läuft
-auf `OPENSMI_TEST_PORT` (Default 4843). Parallele Agenten bauen mit
+`tests/OpenSmi.Client.Tests/TestServer.cs`: `TestServer.StartAsync(port, encryption)` copies
+`opensmi-server/examples/dummy` into a temp directory and patches the port and `encryption` in
+`config.toml` there. There are `StopAsync`, `StartAgainAsync` and `CertificatePath` (the server certificate,
+created on the first encrypted start). The shared server of the collection `server` runs
+on `OPENSMI_TEST_PORT` (default 4843). Parallel agents build with
 `--artifacts-path .artifacts/<name>` (gitignored). Test: `TestServerTests`.

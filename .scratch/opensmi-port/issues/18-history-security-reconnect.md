@@ -6,19 +6,19 @@ Blocked by: 10, 13
 
 ## Question
 
-`ReadHistoryAsync`, `SecurityOptions` mit persistentem Zertifikat und Trust-Store sowie Reconnect
-über den `SessionReconnectHandler` mit erhaltenen Objektidentitäten und Heartbeat-Rebuild. Das
-Reconnect-Verhalten des SDK ist noch unklar; dieses Ticket wird nach 07 präzisiert (Fog).
+`ReadHistoryAsync`, `SecurityOptions` with a persistent certificate and trust store, and reconnect
+through the `SessionReconnectHandler` with preserved object identities and a heartbeat rebuild. The
+reconnect behavior of the SDK is still unclear; this ticket will be refined after 07 (fog).
 
-## Stand 2026-10-29
+## State on 2026-10-29
 
-- **Erledigt:** `ReadHistoryAsync` (mit Continuation Points). Auf dem Dummy-Server ist nur Monitoring
-  historisiert, ParameterSet nicht; das Python-Orakel sieht dasselbe.
-- **Offen:** `SecurityOptions` (persistentes Zertifikat, Trust-Store) und Reconnect über den
-  `SessionReconnectHandler` mit Heartbeat-Rebuild. Bisher reagiert der Client nicht auf
-  KeepAlive-Fehler; eine abgebrochene Session bleibt tot.
+- Done: `ReadHistoryAsync` (with continuation points). On the dummy server only Monitoring
+  is historized, ParameterSet is not; the Python oracle sees the same.
+- Open: `SecurityOptions` (persistent certificate, trust store) and reconnect through the
+  `SessionReconnectHandler` with a heartbeat rebuild. So far the client does not react to
+  KeepAlive errors; a broken session stays dead.
 
 ## Answer
 
-History ist erledigt. Der Rest wird aufgeteilt in [21 Security](21-security.md) und
-[23 Reconnect](23-reconnect.md); die SDK-Frage dazu klärt [22 Reconnect im SDK](22-reconnect-im-sdk.md).
+History is done. The rest is split into [21 Security](21-security.md) and
+[23 Reconnect](23-reconnect.md); the related SDK question is answered by [22 Reconnect in the SDK](22-reconnect-im-sdk.md).

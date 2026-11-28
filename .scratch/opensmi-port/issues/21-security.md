@@ -1,4 +1,4 @@
-# 21 Security: SecurityOptions, persistentes Zertifikat, Trust-Store
+# 21 Security: SecurityOptions, persistent certificate, trust store
 
 Type: task
 Status: resolved
@@ -6,34 +6,34 @@ Blocked by: 20
 
 ## Question
 
-SPEC §7.3 umsetzen. `RemoteServerOptions.Security` vom Typ `SecurityOptions(SecurityPolicyUri,
-Mode, CertificateStorePath, AutoAcceptServerCertificate = false, TrustedPeerStorePath = null)` mit
-`SecurityOptions.None` als Default (heutiges Verhalten). Mit Security wird ein selbstsigniertes
-Client-Zertifikat **einmal** im Store erzeugt (CN „OpenSMI C# Client“, SAN = ApplicationUri) und
-wiederverwendet. Server-Zertifikate werden gegen den Trust-Store geprüft; ohne
-`AutoAcceptServerCertificate` scheitert ein unbekannter Server. Orakel:
-`remote_server.py:325-349` (Python erzeugt pro Connect neu und prüft nichts; beides ist eine
-gewollte Abweichung, SPEC §10).
+Implement SPEC §7.3. `RemoteServerOptions.Security` of type `SecurityOptions(SecurityPolicyUri,
+Mode, CertificateStorePath, AutoAcceptServerCertificate = false, TrustedPeerStorePath = null)` with
+`SecurityOptions.None` as the default (current behavior). With security, a self-signed
+client certificate is created once in the store (CN "OpenSMI C# Client", SAN = ApplicationUri) and
+reused. Server certificates are checked against the trust store; without
+`AutoAcceptServerCertificate` an unknown server fails. Oracle:
+`remote_server.py:325-349` (Python creates a new one on every connect and checks nothing; both are an
+intended deviation, SPEC §10).
 
-## Akzeptanz (Integration, `TestServer.StartAsync(port, encryption: true)`)
+## Acceptance (integration, `TestServer.StartAsync(port, encryption: true)`)
 
-- `Basic256Sha256` + `SignAndEncrypt` mit `AutoAcceptServerCertificate = true` → verbunden, Browse liefert `DummyMachine`
-- zweiter Connect mit demselben Store → dasselbe Client-Zertifikat (Thumbprint gleich)
-- ohne AutoAccept und mit leerem Trust-Store → `OpenSmiConnectionException` (kein Retry-Endlosloop)
-- Server-Zertifikat (`TestServer.CertificatePath`) im Trust-Store → verbunden ohne AutoAccept
-- `SecurityOptions.None` gegen einen Server mit `encryption = true` → `OpenSmiConnectionException`
+- `Basic256Sha256` + `SignAndEncrypt` with `AutoAcceptServerCertificate = true` → connected, browse returns `DummyMachine`
+- a second connect with the same store → the same client certificate (same thumbprint)
+- without AutoAccept and with an empty trust store → `OpenSmiConnectionException` (no endless retry loop)
+- server certificate (`TestServer.CertificatePath`) in the trust store → connected without AutoAccept
+- `SecurityOptions.None` against a server with `encryption = true` → `OpenSmiConnectionException`
 
 ## Answer
 
-Gebaut:
-- `src/OpenSmi.Client/SecurityOptions.cs`: Record laut SPEC §7.3, `SecurityOptions.None` (Policy None, Mode None) als Default in `RemoteServerOptions.Security`.
-- `RemoteServer.CreateSessionAsync`: holt die Endpoints per `DiscoveryClient.GetEndpointsAsync` und nimmt genau den mit passender Policy und Mode; gibt es keinen, kommt sofort `OpenSmiConnectionException` (kein Retry). Mit Security werden Directory-Stores unter `CertificateStorePath` angelegt (`own`, `trusted`, `issuers`, `rejected`; `TrustedPeerStorePath` ersetzt `trusted`). Das Client-Zertifikat (CN „OpenSMI C# Client“, SAN = ApplicationUri) erzeugt `ApplicationInstance.CheckApplicationInstanceCertificatesAsync` beim ersten Connect und nutzt es danach wieder. `AutoAcceptServerCertificate` geht auf `AutoAcceptUntrustedCertificates`.
-- `ConnectAsync`: `BadCertificateUntrusted` wird nicht wiederholt, sondern sofort zur `OpenSmiConnectionException`.
-- Der `shortcut:`-Kommentar ist weg.
+Built:
+- `src/OpenSmi.Client/SecurityOptions.cs`: record as in SPEC §7.3, `SecurityOptions.None` (policy None, mode None) as the default in `RemoteServerOptions.Security`.
+- `RemoteServer.CreateSessionAsync`: fetches the endpoints via `DiscoveryClient.GetEndpointsAsync` and takes exactly the one with the matching policy and mode; if there is none, `OpenSmiConnectionException` comes immediately (no retry). With security, directory stores are created under `CertificateStorePath` (`own`, `trusted`, `issuers`, `rejected`; `TrustedPeerStorePath` replaces `trusted`). The client certificate (CN "OpenSMI C# Client", SAN = ApplicationUri) is created by `ApplicationInstance.CheckApplicationInstanceCertificatesAsync` on the first connect and reused after that. `AutoAcceptServerCertificate` maps to `AutoAcceptUntrustedCertificates`.
+- `ConnectAsync`: `BadCertificateUntrusted` is not retried; it becomes an `OpenSmiConnectionException` immediately.
+- The `shortcut:` comment is gone.
 
-Tests: `tests/OpenSmi.Client.Tests/SecurityTests.cs` mit 5 Integrationstests gegen einen verschlüsselten `TestServer` auf Port 4862 (Klassen-Fixture). Sie decken die fünf Akzeptanzkriterien ab. Die Thumbprint-Gleichheit wird über die Datei in `<store>/own/certs` geprüft, weil `ISession` keine Konfiguration herausgibt.
+Tests: `tests/OpenSmi.Client.Tests/SecurityTests.cs` with 5 integration tests against an encrypted `TestServer` on port 4862 (class fixture). They cover the five acceptance criteria. The thumbprint equality is checked through the file in `<store>/own/certs` because `ISession` does not expose its configuration.
 
-Abweichungen:
-- `CertificateStorePath = null` mit Security nimmt `%LOCALAPPDATA%/OpenSmi.Client/pki`.
-- Die Endpoint-Auswahl ist jetzt exakt (Policy + Mode) statt `CoreClientUtils.SelectEndpointAsync`. Das gilt auch für None.
-- Der Eintrag in `docs/opensmi/DEVIATIONS.md` (SPEC §10) fehlt, weil docs/ einem anderen Agenten gehört.
+Deviations:
+- `CertificateStorePath = null` with security uses `%LOCALAPPDATA%/OpenSmi.Client/pki`.
+- Endpoint selection is now exact (policy + mode) instead of `CoreClientUtils.SelectEndpointAsync`. This also applies to None.
+- The entry in `docs/opensmi/DEVIATIONS.md` (SPEC §10) is missing because docs/ belongs to another agent.

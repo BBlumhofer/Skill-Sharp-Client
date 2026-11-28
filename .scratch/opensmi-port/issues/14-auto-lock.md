@@ -6,13 +6,13 @@ Blocked by: 13
 
 ## Question
 
-`AutoLock(lock, breakLock, interval)` mit `LockAsync(blocking)`, `UnlockAsync`, `IsActive` und
-`DisposeAsync`. Bei fremdem LockingUser wird neu gesperrt, bei `RenewDue` erneuert (höchstens ein
-Renew-Task gleichzeitig). Orakel: `auto_lock.py`.
+`AutoLock(lock, breakLock, interval)` with `LockAsync(blocking)`, `UnlockAsync`, `IsActive` and
+`DisposeAsync`. If another LockingUser holds the lock, it locks again; on `RenewDue` it renews (at most one
+renew task at a time). Oracle: `auto_lock.py`.
 
-## Akzeptanz (Integration)
+## Acceptance (integration)
 
-- orchestrator mit AutoLock; operator bricht den Lock und gibt ihn frei → orchestrator hält den Lock danach wieder
+- orchestrator with AutoLock; operator breaks the lock and releases it → orchestrator holds the lock again afterwards
 
 ## Answer
 

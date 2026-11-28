@@ -6,19 +6,19 @@ Blocked by: 09
 
 ## Question
 
-Die 8 Knoten werden exakt per BrowseName aufgelöst; ein fehlender Knoten führt zu
+The 8 nodes are resolved exactly by BrowseName; a missing node leads to
 `OpenSmiProtocolException`. `InitLockAsync`/`ExitLockAsync`/`BreakLockAsync`/`RenewLockAsync`
-liefern ein `LockResult`. Dazu kommen Cache und Signals (`LockedChanged`, `LockingUserChanged`,
-`RenewDue`), `IsLockedByUs` (nur über den Usernamen) und `ReadStateAsync` mit einem einzigen Read.
-`MaxInactiveLockTime` stammt aus DI i=6387, Fallback 60 000. `RemoteMachine.Lock` wirft ohne
-Lock-Feature `InvalidOperationException`. Orakel: `remote_lock.py`.
+return a `LockResult`. On top of that come a cache and signals (`LockedChanged`, `LockingUserChanged`,
+`RenewDue`), `IsLockedByUs` (by username only) and `ReadStateAsync` with a single read.
+`MaxInactiveLockTime` comes from DI i=6387, fallback 60 000. `RemoteMachine.Lock` throws
+`InvalidOperationException` without the lock feature. Oracle: `remote_lock.py`.
 
-## Akzeptanz (Integration)
+## Acceptance (integration)
 
 - orchestrator Init → `IsLockedByUs`; Exit → `IsLocked == false`
-- Exit ohne Lock → `LockResult.NotLocked`
-- zweiter Client operator (höhere Priorität) ruft `BreakLockAsync` → bei Client 1 feuert `LockingUserChanged`
+- Exit without a lock → `LockResult.NotLocked`
+- a second client, operator (higher priority), calls `BreakLockAsync` → `LockingUserChanged` fires on client 1
 
 ## Answer
 
-`RemoteLock.cs`. Serververhalten: `BreakLock` übernimmt den Lock, auf einem freien Lock liefert es `NotLocked` (-1) und sperrt trotzdem. `ExitLock` ohne Lock gibt `BadUserAccessDenied` statt -1. Tests: `LockTests`.
+`RemoteLock.cs`. Server behavior: `BreakLock` takes over the lock; on a free lock it returns `NotLocked` (-1) and locks anyway. `ExitLock` without a lock returns `BadUserAccessDenied` instead of -1. Tests: `LockTests`.

@@ -6,13 +6,13 @@ Blocked by: 09
 
 ## Question
 
-`RemoteMachine.Users` aus `MachineryBuildingBlocks/Users` mit `Data` (AllowMultiple, UserLevel,
-MaxAccessLevel, IsPresent) und `UserPresenceChanged`. Im DTO heißt das Feld `LockPriority`. Orakel:
+`RemoteMachine.Users` from `MachineryBuildingBlocks/Users` with `Data` (AllowMultiple, UserLevel,
+MaxAccessLevel, IsPresent) and `UserPresenceChanged`. In the DTO the field is called `LockPriority`. Oracle:
 `remote_user.py`.
 
-## Akzeptanz (Integration)
+## Acceptance (integration)
 
-- `Users` enthält `orchestrator` mit `UserLevel == "10"`
+- `Users` contains `orchestrator` with `UserLevel == "10"`
 
 ## Answer
 

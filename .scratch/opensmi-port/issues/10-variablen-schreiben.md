@@ -1,4 +1,4 @@
-# 10 Variablen schreiben, ReadAll/WriteAll, ValueChanged
+# 10 Writing variables, ReadAll/WriteAll, ValueChanged
 
 Type: task
 Status: resolved
@@ -6,18 +6,18 @@ Blocked by: 09, 13
 
 ## Question
 
-`WriteValueAsync` mit Typkonvertierung auf den BuiltInType des gecachten Werts (int → Double) sowie
-string → NodeId/LocalizedText. Nicht beschreibbare Variablen und ungültige Werte führen zu
-`OpenSmiInvalidValueException`, `BadUserAccessDenied` zu `OpenSmiAccessDeniedException`.
-`ReadAllAsync`/`WriteAllAsync` laufen gebatcht; ein unbekannter Name wirft `KeyNotFoundException`,
-bevor etwas geschrieben wird. Dazu `ValueChanged`.
+`WriteValueAsync` with type conversion to the BuiltInType of the cached value (int → Double) and
+string → NodeId/LocalizedText. Variables that are not writable and invalid values lead to
+`OpenSmiInvalidValueException`, `BadUserAccessDenied` to `OpenSmiAccessDeniedException`.
+`ReadAllAsync`/`WriteAllAsync` run batched; an unknown name throws `KeyNotFoundException`
+before anything is written. Plus `ValueChanged`.
 
-## Akzeptanz (Integration)
+## Acceptance (integration)
 
-- `DummyFloatParameter` ← `int 2` → gelesen `2.0`
-- `WriteAllAsync({"Unbekannt": 1})` → `KeyNotFoundException`
-- `ValueChanged` feuert nach dem Schreiben
+- `DummyFloatParameter` ← `int 2` → read back as `2.0`
+- `WriteAllAsync({"Unknown": 1})` → `KeyNotFoundException`
+- `ValueChanged` fires after the write
 
 ## Answer
 
-`WriteValueAsync` (Konvertierung per `TypeInfo.Cast`, Fallback über ValidValues) und `WriteAllAsync` (ein Request, abgelehnte Werte laufen erneut über den Einzel-Write). Tests: `WriteTests`.
+`WriteValueAsync` (conversion via `TypeInfo.Cast`, fallback via ValidValues) and `WriteAllAsync` (one request; rejected values go through the single write again). Tests: `WriteTests`.

@@ -6,15 +6,15 @@ Blocked by: 09
 
 ## Question
 
-Event-Subscription auf `Notification` mit Fallback auf `Messages`. Das Parsing von
-`"<msg>|||<code>"` funktioniert wie in Python, der ErrorCode aus dem Event hat Vorrang. Dazu
-`NotificationReceived`. Orakel: `remote_component.py:285-392`.
+Event subscription on `Notification` with a fallback to `Messages`. Parsing of
+`"<msg>|||<code>"` works as in Python; the ErrorCode from the event takes precedence. Plus
+`NotificationReceived`. Oracle: `remote_component.py:285-392`.
 
-## Akzeptanz
+## Acceptance
 
-- Unit: `"Fehler|||E42"` → (`Fehler`, `E42`); ein ErrorCode aus dem Event hat Vorrang
-- Integration: Ein Skill-Lauf, der eine Notification erzeugt, löst `NotificationReceived` aus
+- Unit: `"Error|||E42"` → (`Error`, `E42`); an ErrorCode from the event takes precedence
+- Integration: a skill run that produces a notification raises `NotificationReceived`
 
 ## Answer
 
-Parsing in `NotificationEvent.Parse`, Events über den SubscriptionManager. Der Fallback auf `Messages` (alte v4-Server) fehlt (`shortcut:`), er gehört ins SmartFactory-Paket. Tests: Unit-Test plus `Skill_run_delivers_notifications`.
+Parsing in `NotificationEvent.Parse`, events through the SubscriptionManager. The fallback to `Messages` (old v4 servers) is missing (`shortcut:`); it belongs in the SmartFactory package. Tests: unit test plus `Skill_run_delivers_notifications`.

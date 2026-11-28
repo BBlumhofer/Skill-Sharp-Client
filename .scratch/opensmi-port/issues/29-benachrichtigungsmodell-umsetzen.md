@@ -1,4 +1,4 @@
-# 29 Benachrichtigungsmodell umsetzen
+# 29 Implement the notification model
 
 Type: task
 Status: resolved
@@ -6,42 +6,42 @@ Blocked by: 25
 
 ## Question
 
-Entscheidung aus [25](25-benachrichtigungsmodell.md) umsetzen:
-- `public delegate Task AsyncEventHandler<in TEventArgs>(object sender, TEventArgs e);` und je Signal
-  ein `event` mit `XxxEventArgs` statt `AsyncSignal<(...)>`: RemoteServer `StatusChanged`, `TimeUpdated`;
+Implement the decision from [25](25-benachrichtigungsmodell.md):
+- `public delegate Task AsyncEventHandler<in TEventArgs>(object sender, TEventArgs e);` and per signal
+  an `event` with `XxxEventArgs` instead of `AsyncSignal<(...)>`: RemoteServer `StatusChanged`, `TimeUpdated`;
   BaseRemoteComponent `StatusChanged`, `NotificationReceived`; RemoteSkill `StateChanged`; RemoteVariable
   `ValueChanged`; RemoteLock `LockedChanged`, `LockingUserChanged`, `RenewDue`; RemoteUser `UserPresenceChanged`.
-- Auslösen nacheinander, Ausnahme je Handler geloggt; nie auf dem SDK-Thread.
-- `WatchStateAsync` (Skill), `WatchValueAsync` (Variable), `WatchStatusAsync` (Server) als
-  `IAsyncEnumerable`: zuerst der aktuelle Wert, begrenzter Puffer je Aufrufer, älteste verwerfen.
-- `AsyncSignal` löschen; `AutoLock`, Beispiele, Tests und README auf das neue Modell umstellen.
-- Doku-Hinweis (XML-Doku am Delegate und README): In einem Handler nicht auf künftige
-  Notifications desselben Clients warten (z. B. `StartAsync(StartWait.Completion)`), dafür Watch/WaitFor nutzen.
-- Unit-Enum in PascalCase generieren (`tools/generate_units.py`), `Description` bleibt der Python-Name.
-- `DEVIATIONS.md`: Signale als Abweichung von Python aufnehmen.
+- Raise one after the other, exception logged per handler; never on the SDK thread.
+- `WatchStateAsync` (skill), `WatchValueAsync` (variable), `WatchStatusAsync` (server) as
+  `IAsyncEnumerable`: current value first, bounded buffer per caller, drop the oldest.
+- Delete `AsyncSignal`; switch `AutoLock`, examples, tests and README to the new model.
+- Docs note (XML docs on the delegate and README): in a handler, do not wait for future
+  notifications of the same client (e.g. `StartAsync(StartWait.Completion)`); use Watch/WaitFor for that.
+- Generate the unit enum in PascalCase (`tools/generate_units.py`), `Description` stays the Python name.
+- `DEVIATIONS.md`: add the signals as a deviation from Python.
 
-## Akzeptanz
+## Acceptance
 
-- Unit: Ein Handler, der wirft, hält den nächsten Handler nicht auf; die Reihenfolge der Handler ist die Anmeldereihenfolge.
-- Unit: `Watch…` liefert zuerst den aktuellen Wert; ein langsamer Konsument verliert alte Werte, bekommt aber den neuesten.
-- Integration: `WatchStateAsync` sieht `Running` und `Completed` eines DummySkill-Laufs.
-- Die volle Suite ist grün, 0 Warnungen.
+- Unit: a handler that throws does not hold up the next handler; the order of the handlers is the registration order.
+- Unit: `Watch…` delivers the current value first; a slow consumer loses old values but gets the newest one.
+- Integration: `WatchStateAsync` sees `Running` and `Completed` of a DummySkill run.
+- The full suite is green, 0 warnings.
 
 ## Answer
 
-Umgesetzt (2026-10-29):
-- `AsyncSignal` ist weg. Neu in `AsyncEvents.cs`: `AsyncEventHandler<TEventArgs>` (XML-Doku mit Hinweis auf die
-  Re-Entrancy-Falle), je Signal ein `sealed record XxxEventArgs`, `RaiseAsync` (Handler nacheinander in
-  Anmeldereihenfolge, Fehler je Handler geloggt) und `Watchers<T>` (je Aufrufer `Channel.CreateBounded(8, DropOldest)`,
-  erst der aktuelle Wert, Abmelden bei Ende/Abbruch der Enumeration).
-- Events: Server `StatusChanged`/`TimeUpdated`, Komponente `StatusChanged`/`NotificationReceived`, Skill `StateChanged`,
-  Variable `ValueChanged`, Lock `LockedChanged`/`LockingUserChanged`/`RenewDue`, User `UserPresenceChanged`.
+Implemented (2026-10-29):
+- `AsyncSignal` is gone. New in `AsyncEvents.cs`: `AsyncEventHandler<TEventArgs>` (XML docs with a note on the
+  re-entrancy trap), one `sealed record XxxEventArgs` per signal, `RaiseAsync` (handlers one after the other in
+  registration order, errors logged per handler) and `Watchers<T>` (per caller `Channel.CreateBounded(8, DropOldest)`,
+  current value first, unsubscribing when the enumeration ends or is cancelled).
+- Events: server `StatusChanged`/`TimeUpdated`, component `StatusChanged`/`NotificationReceived`, skill `StateChanged`,
+  variable `ValueChanged`, lock `LockedChanged`/`LockingUserChanged`/`RenewDue`, user `UserPresenceChanged`.
 - Streams: `RemoteSkill.WatchStateAsync`, `RemoteVariable.WatchValueAsync` (`Variant`), `RemoteServer.WatchStatusAsync`.
-- Statuswechsel aus SDK-Callbacks (KeepAlive, Reconnect) setzen `Status` sofort, die Handler laufen aber über
-  `SubscriptionManager.Post` auf der Dispatch-Schleife statt auf dem SDK-Thread.
-- `AutoLock`, Beispiele, Tests, README (Abschnitt „Änderungen beobachten“) und `DEVIATIONS.md` umgestellt.
-- `Unit` in PascalCase aus `tools/generate_units.py` neu erzeugt; `EUInformation.Description` bleibt der Python-Name.
-- Tests: `EventTests` (Reihenfolge/Isolation, aktueller Wert zuerst, Verlust alter Werte, Abmelden),
+- Status changes from SDK callbacks (KeepAlive, reconnect) set `Status` immediately, but the handlers run through
+  `SubscriptionManager.Post` on the dispatch loop instead of on the SDK thread.
+- `AutoLock`, examples, tests, README (section "Watching changes") and `DEVIATIONS.md` switched over.
+- `Unit` regenerated in PascalCase from `tools/generate_units.py`; `EUInformation.Description` stays the Python name.
+- Tests: `EventTests` (order/isolation, current value first, loss of old values, unsubscribing),
   `SkillTests.Watch_state_sees_running_and_completed`.
-- Offen: `SPEC.md` beschreibt noch `AsyncSignal` (historisches Dokument, nicht angepasst). Watch-Streams enden nicht
-  von selbst beim Disconnect, nur per Token.
+- Open: `SPEC.md` still describes `AsyncSignal` (historical document, not updated). Watch streams do not end
+  on their own on disconnect, only through the token.

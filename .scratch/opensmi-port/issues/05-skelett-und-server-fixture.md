@@ -1,4 +1,4 @@
-# 05 Skelett und Server-Fixture
+# 05 Skeleton and server fixture
 
 Type: task
 Status: resolved
@@ -6,20 +6,20 @@ Blocked by: 02
 
 ## Question
 
-Neue Solution `OpenSmi.Client.slnx` mit `src/OpenSmi.Client` und `tests/OpenSmi.Client.Tests`,
-`Directory.Build.props` (Nullable, TreatWarningsAsErrors) und `.gitignore`. Den Altcode nach
-`legacy/` verschieben. Die xUnit-Fixture startet `python main.py` aus
-`opensmi-server/examples/dummy` (Pfad per `OPENSMI_SERVER_DIR`), wartet auf Port 4843 und beendet
-den Prozess am Ende.
+New solution `OpenSmi.Client.slnx` with `src/OpenSmi.Client` and `tests/OpenSmi.Client.Tests`,
+`Directory.Build.props` (Nullable, TreatWarningsAsErrors) and `.gitignore`. Move the old code to
+`legacy/`. The xUnit fixture starts `python main.py` from
+`opensmi-server/examples/dummy` (path via `OPENSMI_SERVER_DIR`), waits for port 4843 and stops
+the process at the end.
 
-Ponytail: kein separates IntegrationTests-Projekt, Unit- und Integrationstests liegen in einem
-Testprojekt.
+Ponytail: no separate IntegrationTests project; unit and integration tests live in one
+test project.
 
-## Akzeptanz
+## Acceptance
 
-- `dotnet build` ohne Warnungen
-- ein Test verbindet sich mit dem gestarteten Server
+- `dotnet build` without warnings
+- one test connects to the started server
 
 ## Answer
 
-Solution `OpenSmi.Client.slnx`, `Directory.Build.props` (net10.0, Nullable, TreatWarningsAsErrors), `.gitignore`. Der Altcode liegt jetzt in `legacy/` (kein `git mv`, das Repo ist kaputt, siehe 04). Die Fixture `tests/OpenSmi.Client.Tests/ServerFixture.cs` startet den Dummy-Server nur, wenn Port 4843 frei ist. Test-Pakete sind auf den lokalen NuGet-Cache gepinnt (Test.Sdk 17.14.1, xunit 2.9.3, runner 3.1.4), weil kein Feed erreichbar war.
+Solution `OpenSmi.Client.slnx`, `Directory.Build.props` (net10.0, Nullable, TreatWarningsAsErrors), `.gitignore`. The old code now lives in `legacy/` (no `git mv`, the repo is broken, see 04). The fixture `tests/OpenSmi.Client.Tests/ServerFixture.cs` starts the dummy server only if port 4843 is free. Test packages are pinned to the local NuGet cache (Test.Sdk 17.14.1, xunit 2.9.3, runner 3.1.4) because no feed was reachable.

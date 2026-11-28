@@ -1,17 +1,17 @@
-# 02 Testserver lokal startbar
+# 02 Test server can be started locally
 
 Type: task
 Status: resolved
-Blocked by: –
+Blocked by: none
 
 ## Question
 
-Läuft `opensmi-server` lokal so, dass Integrationstests und das Python-Orakel dagegen fahren können?
+Does `opensmi-server` run locally so that integration tests and the Python oracle can run against it?
 
 ## Answer
 
-Ja. `opensmi-server` (547ce5b) ist editable in Python 3.12 installiert.
-`cd ..\opensmi-server\examples\dummy; python main.py` liefert `opc.tcp://localhost:4843/server` mit
-`DummyMachine` (7 Skills, `DummyComponent` → `NestedDummyComponent`, `DummyMethod`). Das Orakel läuft
-mit `PYTHONPATH` auf den Referenz-Checkout e8740c2. Das pip-installierte `OpenSMI-Client 1.0.0rc2`
-ist inkompatibel.
+Yes. `opensmi-server` (547ce5b) is installed as editable in Python 3.12.
+`cd ..\opensmi-server\examples\dummy; python main.py` serves `opc.tcp://localhost:4843/server` with
+`DummyMachine` (7 skills, `DummyComponent` → `NestedDummyComponent`, `DummyMethod`). The oracle runs
+with `PYTHONPATH` pointing at the reference checkout e8740c2. The pip-installed `OpenSMI-Client 1.0.0rc2`
+is incompatible.
