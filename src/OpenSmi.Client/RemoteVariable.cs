@@ -92,9 +92,6 @@ public sealed class RemoteVariable : RemoteUaObject
         return Process(dv.WrappedValue);
     }
 
-    public async Task<Variant> ReadRawValueAsync(CancellationToken cancellationToken = default) =>
-        (await ReadDataValueAsync(cancellationToken).ConfigureAwait(false)).WrappedValue;
-
     /// <summary>Reads the sample from the server, also with a bad status (no exception).</summary>
     public async Task<Sample<object?>> ReadSampleAsync(bool updateCache = false, CancellationToken cancellationToken = default)
     {

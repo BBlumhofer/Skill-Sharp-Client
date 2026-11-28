@@ -1,6 +1,6 @@
 namespace OpenSmi.Client.Tests;
 
-/// <summary>Deviations from SPEC §10 that no other test covers (docs/opensmi/DEVIATIONS.md).</summary>
+/// <summary>Deviations from the Python client that no other test covers (docs/deviations.md).</summary>
 [Collection("server")]
 public class DeviationTests
 {

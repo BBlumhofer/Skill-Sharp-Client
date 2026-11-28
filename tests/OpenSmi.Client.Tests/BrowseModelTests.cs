@@ -38,7 +38,7 @@ public class BrowseModelTests
         Assert.Equal("BaseDataVariableType", f.UaType);
         Assert.Equal("Double", f.UaDataType);
         Assert.True(f.IsWritable);
-        Assert.Equal(ValueRanks.Scalar, f.UaValueRank); // Python always reports 0 (SPEC §10)
+        Assert.Equal(ValueRanks.Scalar, f.UaValueRank);
 
         var i = parameters["DummyIntParameter"];
         Assert.Equal("AnalogUnitRangeType", i.UaType);
